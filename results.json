@@ -1,0 +1,76 @@
+{
+  "vector": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0
+  ],
+  "plaintext": {
+    "total_time_s": 1.0901999985435396e-05,
+    "peak_mem_kb": 0.3359375,
+    "add_result": [
+      2.0,
+      4.0,
+      6.0,
+      8.0,
+      10.0
+    ],
+    "mul_result": [
+      1.0,
+      4.0,
+      9.0,
+      16.0,
+      25.0
+    ],
+    "sum_result": 15.0,
+    "avg_result": 3.0
+  },
+  "tenseal": {
+    "encrypt_time_s": 0.008165015999963998,
+    "encrypt_mem_kb": 1.302734375,
+    "add_time_s": 0.00039772500002754896,
+    "add_mem_kb": 0.375,
+    "mul_time_s": 0.003556478000007246,
+    "mul_mem_kb": 0.3671875,
+    "sum_time_s": 0.01350598699997363,
+    "sum_mem_kb": 0.3828125,
+    "avg_time_s": 0.013906572999985656,
+    "avg_mem_kb": 0.787109375,
+    "dot_time_s": 0.006201422999993156,
+    "dot_mem_kb": 0.6796875,
+    "decrypt_time_s": 0.002596949000007953,
+    "add_max_error": 6.924936624130851e-09,
+    "mul_max_error": 3.343411961509446e-06,
+    "sum_error": 5.511460976492799e-07,
+    "avg_error": 2.9420874847474465e-07,
+    "dot_error": 5.108038934054093e-06,
+    "ciphertext_bytes": 334518
+  },
+  "openfhe": {
+    "encrypt_time_s": 0.03946652300004416,
+    "encrypt_mem_kb": 0.3984375,
+    "add_time_s": 0.00021745099996905992,
+    "add_mem_kb": 0.0625,
+    "mul_time_s": 0.09833664000001363,
+    "mul_mem_kb": 0.0625,
+    "sum_time_s": 0.2954413570000156,
+    "sum_mem_kb": 0.0625,
+    "avg_time_s": 0.304985089000013,
+    "avg_mem_kb": 0.66796875,
+    "dot_time_s": 0.36807472699996424,
+    "dot_mem_kb": 0.4453125,
+    "decrypt_time_s": 0.12894781599999305,
+    "add_max_error": 1.1723955140041653e-13,
+    "mul_max_error": 1.744382416291046e-12,
+    "sum_error": 1.9539925233402755e-14,
+    "avg_error": 4.8405723873656825e-14,
+    "dot_error": 1.2576606422953773e-12
+  },
+  "openfhe_available": true,
+  "totals_ms": {
+    "plaintext": 0.010901999985435396,
+    "tenseal": 48.33015099995919,
+    "openfhe": 1235.4696030000127
+  }
+}
