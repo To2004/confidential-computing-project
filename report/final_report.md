@@ -95,7 +95,7 @@ Timing a homomorphic operation once produces a number that is not reproducible. 
 
 **Drift detection, and why it changed our conclusions.** The harness compares the mean of the first half of the samples against the second half. If they disagree by more than 5% the measurement is flagged: the samples are not from one distribution, and any confidence interval computed from them is meaningless.
 
-This check was not decoration. Our first full run, on a shared login node, was flagged extensively — first-half and second-half means differed by up to **30.9%** for TenSEAL's dot product and **73.2%** in one matched-comparison arm. The node was carrying a load average of 10.4 on 8 cores. Competing load cannot be averaged away, so all results in this report were re-measured on an **exclusive compute node** with threading pinned. After that change the worst drift on any encrypted measurement was **1.1%**.
+This check was not decoration. Our first full run, on a shared login node, was flagged extensively — first-half and second-half means differed by up to **30.9%** for TenSEAL's dot product and **73.2%** in one matched-comparison arm. The node was carrying a load average of 10.4 on 8 cores. Competing load cannot be averaged away, so all results in this report were re-measured on an **exclusive compute node** with threading pinned. After that change the worst drift on any encrypted measurement was **2.9%**. The only measurement still flagged is the plaintext dot product at 5.1%, which runs in about a microsecond — at that scale timer resolution and scheduling jitter are comparable to the quantity being measured.
 
 **Separating timing from memory measurement.** `tracemalloc` hooks every Python allocation and distorts short timings, so it is never active while the clock is running. Memory is a second pass.
 
@@ -142,7 +142,7 @@ Input vector for the primitive benchmark: `[1.0, 2.0, 3.0, 4.0, 5.0]`. Every tim
 | Decrypt | — | 1.4029 | 22.6702 | — | — | 16.16× |
 | **Total** | **0.002841** | **45.1123** | **324.7763** | **15,876×** | **114,299×** | **7.20×** |
 
-![Mean time per operation, and slowdown versus plaintext. Bars carry 95% confidence intervals; note the log scale on both panels.](chart_operations.png)
+![Mean time per operation, and slowdown versus plaintext. Bars carry 95% confidence intervals; note the log scale on both panels.](../figures/chart_operations.png)
 
 **Key findings:**
 
@@ -202,7 +202,7 @@ We therefore added a measurement that allocates many ciphertexts, keeps them ali
 - For a 5-element vector, TenSEAL's ciphertext is **334 KB against 40 bytes** of plaintext — an expansion of about **8,360×**. OpenFHE's is 1.3 MB, consistent with its doubled ring dimension.
 - This expansion, not RAM, is the practical obstacle in a cloud setting: it is what must cross the network. §6.6 shows the ratio improves greatly when slots are actually used.
 
-![Left: what `tracemalloc` reports — Python wrapper objects only. Right: what a ciphertext actually costs, by resident-set growth and by serialization, against the 40-byte plaintext vector. The two panels differ by roughly six orders of magnitude.](chart_memory.png)
+![Left: what `tracemalloc` reports — Python wrapper objects only. Right: what a ciphertext actually costs, by resident-set growth and by serialization, against the 40-byte plaintext vector. The two panels differ by roughly six orders of magnitude.](../figures/chart_memory.png)
 
 ### 5.5 Approximation Error
 
@@ -214,7 +214,7 @@ We therefore added a measurement that allocates many ciphertexts, keeps them ali
 | Average | $3.10 \times 10^{-7}$ | $5.20 \times 10^{-14}$ | $6.0 \times 10^{6}$ |
 | Dot Product | $5.19 \times 10^{-6}$ | $3.27 \times 10^{-13}$ | $1.6 \times 10^{7}$ |
 
-![CKKS approximation error per operation, log scale.](chart_errors.png)
+![CKKS approximation error per operation, log scale.](../figures/chart_errors.png)
 
 **Key findings:**
 
@@ -243,7 +243,7 @@ Growth from smallest to largest input — a 100× increase in data:
 | TenSEAL | 7.3× | 7.43 ms | 0.54 ms | 13.7× |
 | OpenFHE | 2.0× | 60.31 ms | 1.21 ms | 49.7× |
 
-![Pipeline time versus vector size. Left: the encrypted libraries. Right: all three on a log scale.](chart_scaling.png)
+![Pipeline time versus vector size. Left: the encrypted libraries. Right: all three on a log scale.](../figures/chart_scaling.png)
 
 **Key findings:**
 
@@ -274,7 +274,7 @@ Taken at face value, §5.1 and §5.5 say "TenSEAL is faster, OpenFHE is more pre
 
 Per-operation, matched (FIXEDMANUAL) against TenSEAL: encrypt 5.55 vs 5.44 ms, add 0.17 vs 0.10, multiply 9.03 vs 4.67, sum 25.32 vs 10.52, dot 34.22 vs 11.08, decrypt 9.46 vs 1.39.
 
-![OpenFHE placed on TenSEAL's parameters. Lower is better in both panels.](chart_matched_comparison.png)
+![OpenFHE placed on TenSEAL's parameters. Lower is better in both panels.](../figures/chart_matched_comparison.png)
 
 **Key findings:**
 
@@ -405,7 +405,7 @@ Parameters as established above: TenSEAL at ring 16384 with `[60,40,40,40,40,60]
 | **Cohort mean, plaintext** | **35.626948** | **35.626948** |
 | Cohort mean absolute error | $4.431 \times 10^{-4}$ | $1.649 \times 10^{-11}$ |
 
-![Encrypted synthetic risk score over 1000 patients: per-stage cost, cohort score distribution, and accuracy against the plaintext reference.](chart_risk_score.png)
+![Encrypted synthetic risk score over 1000 patients: per-stage cost, cohort score distribution, and accuracy against the plaintext reference.](../figures/chart_risk_score.png)
 
 **Key findings:**
 
@@ -438,7 +438,7 @@ The observable signature of any decryption-noise defence is **randomization**: p
 | OpenFHE, `FIXED_NOISE_DECRYPT` (default) | Yes | $5.71 \times 10^{-11}$ |
 | OpenFHE, `NOISE_FLOODING_DECRYPT` | Yes, calibrated | $1.28 \times 10^{-13}$ |
 
-![Cost of the flooding defence, and which configurations randomize the released value.](chart_ind_cpad.png)
+![Cost of the flooding defence, and which configurations randomize the released value.](../figures/chart_ind_cpad.png)
 
 **In the version we tested, TenSEAL's decryption is bit-deterministic**, so the released value carries exactly the key-dependent error the attack exploits, and TenSEAL exposes no setting to change this. OpenFHE randomizes by default — which surprised us; we expected the default arm to be a bare baseline.
 
@@ -524,7 +524,7 @@ Our contribution relative to this literature is not new cryptanalysis. It is an 
 
 1. **HE works, and "how expensive" depends entirely on which operation and how full the ciphertexts are.** Overhead ranged from 153× for an encrypted addition to 32,832× for a summation on a 5-element vector, and fell to 3,614× for the whole risk-score pipeline once 1000 values shared each ciphertext. Any single headline multiplier for "the cost of HE" is misleading.
 
-2. **Rigorous measurement changed the numbers, and once changed our conclusions.** Contaminated measurements on a shared machine produced drifts up to 73% while showing narrow confidence intervals. Moving to an exclusive node cut worst-case drift to 1.1% — and changed the matched-comparison result materially, from an apparent 5× residual gap to 1.93×.
+2. **Rigorous measurement changed the numbers, and once changed our conclusions.** Contaminated measurements on a shared machine produced drifts up to 73% while showing narrow confidence intervals. Moving to an exclusive node cut worst-case drift on the encrypted measurements to 2.9% — and changed the matched-comparison result materially, from an apparent 5× residual gap to 1.93×.
 
 3. **Circuit depth, not data volume, is the real cost driver.** Slot packing makes 1000 patients almost as cheap as 5. Adding two interaction terms and a quadratic term raised the required depth from 2 to 4, forced the ring dimension to double, and slowed every operation. Over-provisioning depth doubles it again for nothing.
 

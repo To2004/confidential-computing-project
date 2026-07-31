@@ -19,6 +19,7 @@ warnings.filterwarnings("ignore")
 import tenseal as ts
 
 import benchmark_harness as harness
+import project_paths
 
 try:
     from openfhe import CCParamsCKKSRNS, GenCryptoContext, PKESchemeFeature
@@ -125,7 +126,8 @@ def main():
                         help=f"timed repetitions per size (default {harness.DEFAULT_REPEATS})")
     parser.add_argument("--warmup", type=int, default=DEFAULT_SCALING_WARMUP,
                         help=f"discarded warm-up calls (default {DEFAULT_SCALING_WARMUP})")
-    parser.add_argument("--output", default="scaling_results.json",
+    parser.add_argument("--output",
+                        default=project_paths.result_path("scaling_results.json"),
                         help="where to write the JSON results")
     args = parser.parse_args()
 

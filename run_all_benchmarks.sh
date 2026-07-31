@@ -12,6 +12,10 @@
 # an hour of benchmarking is spent measuring it):
 #   SKIP_TESTS=1 ./run_all_benchmarks.sh
 #
+# Layout: sources in src/, JSON results in results/, charts in figures/. Scripts
+# resolve those directories from their own location (see src/project_paths.py),
+# so this works from any working directory.
+#
 set -euo pipefail
 
 REPEATS="${REPEATS:-1000}"
@@ -30,34 +34,34 @@ echo "############################################################"
 if [ "${SKIP_TESTS}" != "1" ]; then
   echo
   echo "=== 0/6  Unit tests ==="
-  "${PYTHON}" -m unittest discover -p 'test_*.py'
+  "${PYTHON}" -m unittest discover -s tests
 fi
 
 echo
 echo "=== 1/6  Primitive operations (plaintext vs TenSEAL vs OpenFHE) ==="
-"${PYTHON}" run_comparison.py --repeats "${REPEATS}"
+"${PYTHON}" src/run_comparison.py --repeats "${REPEATS}"
 
 echo
 echo "=== 2/6  Scaling with vector size ==="
-"${PYTHON}" benchmark_scaling.py --repeats "${REPEATS}"
+"${PYTHON}" src/benchmark_scaling.py --repeats "${REPEATS}"
 
 echo
 echo "=== 3/6  Encrypted synthetic medical risk score ==="
-"${PYTHON}" risk_score_benchmark.py --repeats "${REPEATS}"
+"${PYTHON}" src/risk_score_benchmark.py --repeats "${REPEATS}"
 
 # The two experiments below run a full pipeline per repetition and exist to
 # isolate a single effect, so they use a lower default repetition count.
 echo
 echo "=== 4/6  Matched-parameter comparison (OpenFHE at TenSEAL's parameters) ==="
-"${PYTHON}" matched_comparison.py --repeats "$(( REPEATS < 200 ? REPEATS : 200 ))"
+"${PYTHON}" src/matched_comparison.py --repeats "$(( REPEATS < 200 ? REPEATS : 200 ))"
 
 echo
 echo "=== 5/6  IND-CPA^D noise flooding cost ==="
-"${PYTHON}" ind_cpad_flooding.py --repeats "$(( REPEATS < 200 ? REPEATS : 200 ))"
+"${PYTHON}" src/ind_cpad_flooding.py --repeats "$(( REPEATS < 200 ? REPEATS : 200 ))"
 
 echo
 echo "=== 6/6  Charts ==="
-"${PYTHON}" plot_results.py
+"${PYTHON}" src/plot_results.py
 
 echo
 echo "All benchmarks complete."

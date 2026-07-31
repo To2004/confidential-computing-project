@@ -1,11 +1,8 @@
 """
 Generate charts from benchmark results.
 
-Reads:  results.json             (from run_comparison.py)
-        scaling_results.json     (from benchmark_scaling.py)
-        risk_score_results.json  (from risk_score_benchmark.py, optional)
-Saves:  chart_operations.png, chart_memory.png, chart_errors.png,
-        chart_scaling.png, chart_risk_score.png
+Reads:  results/*.json           (written by the benchmark scripts)
+Saves:  figures/chart_*.png
 
 Bars and markers carry 95% confidence intervals on the mean, which is what the
 1000-repetition methodology buys: the error bars show that the reported means are
@@ -28,6 +25,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+import project_paths
 
 # Categorical palette, fixed slot order. Validated for CVD separation against a
 # light surface; replaces an earlier green/orange pairing that was
@@ -74,7 +73,9 @@ def apply_style():
     })
 
 
-def load(path, required=True):
+def load(name, required=True):
+    """Load a results JSON by bare filename, from the project's results/ directory."""
+    path = project_paths.result_path(name)
     if not os.path.exists(path):
         if required:
             raise FileNotFoundError(f"{path} not found.")
@@ -189,9 +190,9 @@ def chart_operations(data):
     fig.suptitle("CKKS operation cost", fontsize=12.5, fontweight="bold", color=INK)
     fig.text(0.5, 0.005, repeat_note(data), ha="center", fontsize=8, color=INK_SOFT)
     plt.tight_layout(rect=(0, 0.03, 1, 0.96))
-    plt.savefig("chart_operations.png", dpi=150)
+    plt.savefig(project_paths.figure_path("chart_operations.png"), dpi=150)
     plt.close()
-    print("Saved chart_operations.png")
+    print("Saved figures/chart_operations.png")
 
 
 # ── Chart 2: Memory usage ────────────────────────────────────────────────────
@@ -270,9 +271,9 @@ def chart_memory(data):
              "size agree within ~7% and are six orders of magnitude larger.",
              ha="center", fontsize=8, color=INK_SOFT)
     plt.tight_layout(rect=(0, 0.035, 1, 0.94))
-    plt.savefig("chart_memory.png", dpi=150)
+    plt.savefig(project_paths.figure_path("chart_memory.png"), dpi=150)
     plt.close()
-    print("Saved chart_memory.png")
+    print("Saved figures/chart_memory.png")
 
 
 # ── Chart 3: Approximation errors ────────────────────────────────────────────
@@ -305,9 +306,9 @@ def chart_errors(data):
     ax.set_axisbelow(True)
     ax.legend()
     plt.tight_layout()
-    plt.savefig("chart_errors.png", dpi=150)
+    plt.savefig(project_paths.figure_path("chart_errors.png"), dpi=150)
     plt.close()
-    print("Saved chart_errors.png")
+    print("Saved figures/chart_errors.png")
 
 
 # ── Chart 4: Scaling ─────────────────────────────────────────────────────────
@@ -368,9 +369,9 @@ def chart_scaling(sc):
                  fontweight="bold", color=INK)
     fig.text(0.5, 0.005, repeat_note(sc), ha="center", fontsize=8, color=INK_SOFT)
     plt.tight_layout(rect=(0, 0.03, 1, 0.95))
-    plt.savefig("chart_scaling.png", dpi=150)
+    plt.savefig(project_paths.figure_path("chart_scaling.png"), dpi=150)
     plt.close()
-    print("Saved chart_scaling.png")
+    print("Saved figures/chart_scaling.png")
 
 
 # ── Chart 5: Encrypted medical risk score ────────────────────────────────────
@@ -457,9 +458,9 @@ def chart_risk_score(rs):
              + repeat_note(rs),
              ha="center", fontsize=8, color=INK_SOFT)
     plt.tight_layout(rect=(0, 0.035, 1, 0.94))
-    plt.savefig("chart_risk_score.png", dpi=150)
+    plt.savefig(project_paths.figure_path("chart_risk_score.png"), dpi=150)
     plt.close()
-    print("Saved chart_risk_score.png")
+    print("Saved figures/chart_risk_score.png")
 
 
 # ── Chart 6: Matched-parameter comparison ────────────────────────────────────
@@ -523,9 +524,9 @@ def chart_matched(mc):
              "speed gap; the precision gap does not come from the scaling factor alone.",
              ha="center", fontsize=8, color=INK_SOFT)
     plt.tight_layout(rect=(0, 0.035, 1, 0.94))
-    plt.savefig("chart_matched_comparison.png", dpi=150)
+    plt.savefig(project_paths.figure_path("chart_matched_comparison.png"), dpi=150)
     plt.close()
-    print("Saved chart_matched_comparison.png")
+    print("Saved figures/chart_matched_comparison.png")
 
 
 # ── Chart 7: IND-CPA^D noise flooding ────────────────────────────────────────
@@ -602,9 +603,9 @@ def chart_ind_cpad(ic):
              "noise estimate is average-case, which Guo et al. (USENIX Sec. 2024) attack.",
              ha="center", fontsize=8, color=INK_SOFT)
     plt.tight_layout(rect=(0, 0.05, 1, 0.94))
-    plt.savefig("chart_ind_cpad.png", dpi=150)
+    plt.savefig(project_paths.figure_path("chart_ind_cpad.png"), dpi=150)
     plt.close()
-    print("Saved chart_ind_cpad.png")
+    print("Saved figures/chart_ind_cpad.png")
 
 
 def main():
