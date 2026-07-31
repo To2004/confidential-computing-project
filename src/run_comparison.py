@@ -16,6 +16,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import benchmark_harness as harness
+import project_paths
 import plaintext_baseline as pt_bench
 import tenseal_benchmark as ts_bench
 
@@ -190,7 +191,8 @@ def main():
     harness.add_repeat_arguments(parser)
     parser.add_argument("--keygen-repeats", type=int, default=50,
                         help="repetitions for the key-generation timing (default 50)")
-    parser.add_argument("--output", default="results.json",
+    parser.add_argument("--output",
+                        default=project_paths.result_path("results.json"),
                         help="where to write the JSON results")
     args = parser.parse_args()
 

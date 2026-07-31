@@ -45,6 +45,7 @@ warnings.filterwarnings("ignore")
 import numpy as np
 
 import benchmark_harness as harness
+import project_paths
 import synthetic_patients as patients
 
 # Matches the 1000 repetitions used for the primitive operations. A pipeline call
@@ -387,7 +388,8 @@ def main():
                         help="repetitions for the memory pass (default 3)")
     parser.add_argument("--skip-openfhe", action="store_true",
                         help="run only the plaintext and TenSEAL versions")
-    parser.add_argument("--output", default="risk_score_results.json",
+    parser.add_argument("--output",
+                        default=project_paths.result_path("risk_score_results.json"),
                         help="where to write the JSON results")
     args = parser.parse_args()
 

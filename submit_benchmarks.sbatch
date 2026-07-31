@@ -58,7 +58,7 @@ echo "# Repetitions   : ${REPEATS}"
 echo "# Python        : $(python -V 2>&1)"
 echo "############################################################"
 
-python -m unittest discover -p 'test_*.py'
+python -m unittest discover -s tests
 
 REPEATS="${REPEATS}" SKIP_TESTS=1 ./run_all_benchmarks.sh
 

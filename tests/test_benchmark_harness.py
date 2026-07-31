@@ -7,7 +7,14 @@ checked against values worked out by hand rather than trusted. Run with:
     python -m unittest discover -p 'test_*.py'
 """
 
+import os
+import sys
 import unittest
+
+# The modules under test live in src/; make them importable however the tests
+# are invoked (unittest discover from the repo root, or pytest, or directly).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "src"))
+
 
 import benchmark_harness as harness
 

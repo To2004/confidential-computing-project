@@ -102,6 +102,7 @@ import openfhe as fhe
 from openfhe import CCParamsCKKSRNS, GenCryptoContext, PKESchemeFeature
 
 import benchmark_harness as harness
+import project_paths
 import synthetic_patients as patients
 
 # Small cohort: this experiment is about the security/performance trade-off, and
@@ -272,7 +273,9 @@ def main():
     parser.add_argument("--seed", type=int, default=patients.DEFAULT_SEED)
     parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
     parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
-    parser.add_argument("--output", default="ind_cpad_results.json")
+    parser.add_argument("--output",
+                        default=project_paths.result_path("ind_cpad_results.json"),
+                        help="where to write the JSON results")
     args = parser.parse_args()
 
     import risk_score_benchmark as rsb

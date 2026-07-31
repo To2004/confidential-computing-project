@@ -45,6 +45,7 @@ from openfhe import (CCParamsCKKSRNS, GenCryptoContext, PKESchemeFeature,
                      SecurityLevel)
 
 import benchmark_harness as harness
+import project_paths
 
 VECTOR = [1.0, 2.0, 3.0, 4.0, 5.0]
 
@@ -171,7 +172,9 @@ def main():
                         help=f"timed repetitions per operation (default {DEFAULT_REPEATS})")
     parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP,
                         help=f"discarded warm-up calls (default {DEFAULT_WARMUP})")
-    parser.add_argument("--output", default="matched_comparison_results.json")
+    parser.add_argument("--output",
+                        default=project_paths.result_path("matched_comparison_results.json"),
+                        help="where to write the JSON results")
     args = parser.parse_args()
 
     print("=" * 100)

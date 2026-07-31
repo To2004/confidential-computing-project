@@ -6,18 +6,18 @@ Ben-Gurion University of the Negev.
 
 The project measures what homomorphic encryption actually costs: runtime, memory,
 approximation error, and how all three behave on a computation more realistic than
-a single average. The write-up is in [`final_report.md`](final_report.md).
+a single average. The write-up is in [`report/final_report.md`](report/final_report.md).
 
 ## What is measured
 
 | Experiment | Script | Output |
 |---|---|---|
-| Primitive operations (encrypt, add, multiply, sum, average, dot product, decrypt) + key generation | `run_comparison.py` | `results.json` |
-| Scaling with vector size (5 → 500 elements) | `benchmark_scaling.py` | `scaling_results.json` |
-| Encrypted synthetic medical risk score over 1000 patients | `risk_score_benchmark.py` | `risk_score_results.json` |
-| OpenFHE forced onto TenSEAL's parameters (like-for-like) | `matched_comparison.py` | `matched_comparison_results.json` |
-| IND-CPA^D: is decryption randomized, and what does flooding cost | `ind_cpad_flooding.py` | `ind_cpad_results.json` |
-| All charts | `plot_results.py` | `chart_*.png` |
+| Primitive operations (encrypt, add, multiply, sum, average, dot product, decrypt) + key generation | `src/run_comparison.py` | `results/results.json` |
+| Scaling with vector size (5 → 500 elements) | `src/benchmark_scaling.py` | `results/scaling_results.json` |
+| Encrypted synthetic medical risk score over 1000 patients | `src/risk_score_benchmark.py` | `results/risk_score_results.json` |
+| OpenFHE forced onto TenSEAL's parameters (like-for-like) | `src/matched_comparison.py` | `results/matched_comparison_results.json` |
+| IND-CPA^D: is decryption randomized, and what does flooding cost | `src/ind_cpad_flooding.py` | `results/ind_cpad_results.json` |
+| All charts | `src/plot_results.py` | `figures/chart_*.png` |
 
 Every timed figure is a **mean over 1000 repetitions**, taken after a warm-up phase
 that is discarded. See [Methodology](#methodology) below.
@@ -63,10 +63,12 @@ REPEATS=5 ./run_all_benchmarks.sh
 Individual experiments, with the repetition count under your control:
 
 ```bash
-python run_comparison.py       --repeats 1000 --warmup 50
-python benchmark_scaling.py    --repeats 1000 --warmup 20
-python risk_score_benchmark.py --repeats 1000 --warmup 20
-python plot_results.py
+python src/run_comparison.py       --repeats 1000 --warmup 50
+python src/benchmark_scaling.py    --repeats 1000 --warmup 20
+python src/risk_score_benchmark.py --repeats 1000 --warmup 20
+python src/matched_comparison.py   --repeats 200
+python src/ind_cpad_flooding.py    --repeats 200
+python src/plot_results.py
 ```
 
 Useful flags: `--patients` and `--seed` on the risk-score benchmark,
@@ -92,14 +94,14 @@ sbatch submit_benchmarks.sbatch
 ```
 
 That requests an exclusive node and pins threading (`OMP_NUM_THREADS=1`) so both
-libraries are measured on identical footing. Worst-case drift dropped from 30.9%
-to 1.1%. If you run on a shared machine anyway, check the `drift_pct` and
+libraries are measured on identical footing. Worst-case drift on the encrypted
+measurements dropped from 30.9% to 2.9%. If you run on a shared machine anyway, check the `drift_pct` and
 `drift_flagged` fields in the results JSON before believing any number.
 
 ### Tests
 
 ```bash
-python -m unittest discover -p 'test_*.py'
+python -m unittest discover -s tests
 ```
 
 40 tests covering the statistics (against hand-computed values), the risk score
@@ -111,13 +113,13 @@ results.
 
 | File | Content |
 |---|---|
-| `chart_operations.png` | Mean time per operation, and slowdown vs plaintext |
-| `chart_memory.png` | Peak Python-side memory per operation |
-| `chart_errors.png` | CKKS approximation error per operation |
-| `chart_scaling.png` | Pipeline time vs vector size |
-| `chart_risk_score.png` | Risk-score stage costs, cohort distribution, accuracy |
-| `chart_matched_comparison.png` | OpenFHE at TenSEAL's parameters: speed and precision |
-| `chart_ind_cpad.png` | Cost of the IND-CPA^D defence, and which libraries randomize decryption |
+| `figures/chart_operations.png` | Mean time per operation, and slowdown vs plaintext |
+| `figures/chart_memory.png` | Peak Python-side memory per operation |
+| `figures/chart_errors.png` | CKKS approximation error per operation |
+| `figures/chart_scaling.png` | Pipeline time vs vector size |
+| `figures/chart_risk_score.png` | Risk-score stage costs, cohort distribution, accuracy |
+| `figures/chart_matched_comparison.png` | OpenFHE at TenSEAL's parameters: speed and precision |
+| `figures/chart_ind_cpad.png` | Cost of the IND-CPA^D defence, and which libraries randomize decryption |
 
 Bars and markers carry 95% confidence intervals. Series colours are a
 colourblind-safe categorical set, checked for deuteranopia, protanopia and
@@ -130,9 +132,12 @@ tritanopia separation.
 environment does not otherwise require:
 
 ```bash
+cd report
 pandoc final_report.md -o final_report.pdf \
-  --pdf-engine=tectonic -V geometry:margin=2.2cm -V colorlinks=true
+  --pdf-engine=tectonic -V geometry:margin=2.2cm -V colorlinks=true -V fontsize=10pt
 ```
+
+Run it from `report/` so the `../figures/…` image paths resolve.
 
 Install those with `conda install -c conda-forge pandoc tectonic`. If you edit
 `final_report.md`, re-run this or the PDF will go stale.
@@ -168,13 +173,13 @@ test.
 inputs, so no repetition inherits accumulated noise or a consumed multiplicative
 level from the one before it.
 
-All of this lives in [`benchmark_harness.py`](benchmark_harness.py).
+All of this lives in [`src/benchmark_harness.py`](src/benchmark_harness.py).
 
 ## The medical use case
 
-`synthetic_patients.py` generates a synthetic cohort of 1000 patients with five
+`src/synthetic_patients.py` generates a synthetic cohort of 1000 patients with five
 features (age, systolic blood pressure, BMI, cholesterol, glucose) and defines a
-**synthetic risk score** over them. `risk_score_benchmark.py` evaluates that score
+**synthetic risk score** over them. `src/risk_score_benchmark.py` evaluates that score
 homomorphically and compares it against the plaintext reference.
 
 > The risk score is a synthetic construct built for demonstration purposes only.
@@ -190,27 +195,34 @@ requires ciphertext × ciphertext multiplication rather than only multiplication
 public constants. The exact definition is in the `synthetic_patients` module
 docstring.
 
-## Files
+## Repository layout
 
-| File | Purpose |
+```
+.
+├── run_all_benchmarks.sh     reproduce every experiment, then the charts
+├── submit_benchmarks.sbatch  the same, on an exclusive SLURM node
+├── src/                      benchmark and experiment code
+├── tests/                    unit tests (40, plain unittest)
+├── results/                  benchmark output, JSON
+├── figures/                  generated charts, PNG
+├── report/                   final_report.md, its PDF, and the proposal
+└── notebooks/                self-contained Colab notebook
+```
+
+Each directory has its own `README.md` describing what is in it and how it is
+produced. The scripts locate `results/` and `figures/` from their own location
+(see [`src/project_paths.py`](src/project_paths.py)), so they behave identically
+whether you run them from the repository root or from inside `src/`.
+
+Start here:
+
+| I want to… | Go to |
 |---|---|
-| `benchmark_harness.py` | Warm-up, repetition, and statistics shared by every benchmark |
-| `plaintext_baseline.py` | Unencrypted reference implementation |
-| `tenseal_benchmark.py` | TenSEAL (CKKS) primitive operations |
-| `openfhe_benchmark.py` | OpenFHE (CKKS) primitive operations |
-| `run_comparison.py` | Runs all three, prints the comparison, writes `results.json` |
-| `benchmark_scaling.py` | Pipeline time at vector sizes 5–500 |
-| `synthetic_patients.py` | Synthetic cohort + synthetic risk score definition |
-| `risk_score_benchmark.py` | Encrypted evaluation of the risk score |
-| `matched_comparison.py` | OpenFHE forced onto TenSEAL's ring dimension and scaling factor |
-| `ind_cpad_flooding.py` | IND-CPA^D: is decryption randomized, and what does flooding cost |
-| `test_benchmark_harness.py` | Unit tests for the statistics (mean, median, drift, memory) |
-| `test_synthetic_patients.py` | Unit tests for the risk score and the padding invariant |
-| `submit_benchmarks.sbatch` | Run the suite on an exclusive SLURM node (see below) |
-| `plot_results.py` | All charts |
-| `run_all_benchmarks.sh` | Reproduce everything end to end |
-| `colab_benchmark.ipynb` | Self-contained notebook version (Colab is Linux, so both libraries work there) |
-| `final_report.md` | The report |
+| Read the findings | [`report/final_report.md`](report/final_report.md) |
+| Understand the measurement method | [`src/benchmark_harness.py`](src/benchmark_harness.py) |
+| See the risk score definition | [`src/synthetic_patients.py`](src/synthetic_patients.py) |
+| Reproduce the numbers | `./run_all_benchmarks.sh` |
+| Check what the numbers mean | [`results/README.md`](results/README.md) |
 
 ## Authors
 
