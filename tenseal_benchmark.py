@@ -1,12 +1,43 @@
 """
 TenSEAL Benchmark — CKKS scheme
 Implements all mandatory operations from the project proposal.
+
+Every operation is timed over many repetitions after a discarded warm-up phase,
+and the reported figure is the mean; see `benchmark_harness` for the rationale.
+
 Install: pip install tenseal
+Usage:   python tenseal_benchmark.py [--repeats 1000] [--warmup 50]
 """
 
-import time
-import tracemalloc
+import argparse
+import warnings
+
+warnings.filterwarnings("ignore")
+
 import tenseal as ts
+
+import benchmark_harness as harness
+
+OP_NAMES = [
+    ("Encrypt", "encrypt"),
+    ("Add", "add"),
+    ("Multiply", "mul"),
+    ("Sum", "sum"),
+    ("Average", "avg"),
+    ("Dot Product", "dot"),
+    ("Decrypt", "decrypt"),
+]
+
+# Loose upper bounds on the decryption error, ~3 orders of magnitude above what
+# these parameters actually produce. Exceeding one of these means the circuit
+# broke, not that CKKS was noisy — see harness.assert_accuracy.
+ACCURACY_LIMITS = {
+    "add_max_error": 1e-4,
+    "mul_max_error": 1e-2,
+    "sum_error": 1e-3,
+    "avg_error": 1e-3,
+    "dot_error": 1e-2,
+}
 
 
 def make_context():
@@ -20,75 +51,39 @@ def make_context():
     return ctx
 
 
-def _tick():
-    return time.perf_counter()
-
-
-def run_benchmark(vector: list[float]) -> dict:
-    results = {}
+def run_benchmark(vector, repeats=harness.DEFAULT_REPEATS, warmup=harness.DEFAULT_WARMUP,
+                  memory_repeats=harness.DEFAULT_MEMORY_REPEATS, verbose=True):
     ctx = make_context()
     n = len(vector)
-
-    # --- Encryption ---
-    tracemalloc.start()
-    t0 = _tick()
-    enc = ts.ckks_vector(ctx, vector)
-    results["encrypt_time_s"] = _tick() - t0
-    results["encrypt_mem_kb"] = tracemalloc.get_traced_memory()[1] / 1024
-    tracemalloc.stop()
-
-    # --- Encrypted Addition (enc + enc) ---
-    tracemalloc.start()
-    t0 = _tick()
-    enc_add = enc + enc
-    results["add_time_s"] = _tick() - t0
-    results["add_mem_kb"] = tracemalloc.get_traced_memory()[1] / 1024
-    tracemalloc.stop()
-
-    # --- Encrypted Multiplication (enc * enc) ---
-    tracemalloc.start()
-    t0 = _tick()
-    enc_mul = enc * enc
-    results["mul_time_s"] = _tick() - t0
-    results["mul_mem_kb"] = tracemalloc.get_traced_memory()[1] / 1024
-    tracemalloc.stop()
-
-    # --- Encrypted Summation (sum of all slots) ---
-    tracemalloc.start()
-    t0 = _tick()
-    enc_sum = enc.sum()
-    results["sum_time_s"] = _tick() - t0
-    results["sum_mem_kb"] = tracemalloc.get_traced_memory()[1] / 1024
-    tracemalloc.stop()
-
-    # --- Encrypted Average (sum / n, plaintext scalar division) ---
-    tracemalloc.start()
-    t0 = _tick()
-    enc_avg = enc.sum() * (1.0 / n)
-    results["avg_time_s"] = _tick() - t0
-    results["avg_mem_kb"] = tracemalloc.get_traced_memory()[1] / 1024
-    tracemalloc.stop()
-
-    # --- Encrypted Dot Product (enc · enc2, element-wise mul then sum) ---
     vector2 = [v * 0.5 + 1.0 for v in vector]
-    enc2 = ts.ckks_vector(ctx, vector2)
-    tracemalloc.start()
-    t0 = _tick()
-    enc_dot = (enc * enc2).sum()
-    results["dot_time_s"] = _tick() - t0
-    results["dot_mem_kb"] = tracemalloc.get_traced_memory()[1] / 1024
-    tracemalloc.stop()
 
-    # --- Decryption ---
-    t0 = _tick()
-    dec_add = enc_add.decrypt()
-    dec_mul = enc_mul.decrypt()
-    dec_sum = enc_sum.decrypt()[0]
-    dec_avg = enc_avg.decrypt()[0]
-    dec_dot = enc_dot.decrypt()[0]
-    results["decrypt_time_s"] = _tick() - t0
+    enc = ts.ckks_vector(ctx, vector)
+    enc2 = ts.ckks_vector(ctx, vector2)
+
+    # Each operation starts from the same freshly encrypted operands, so no
+    # repetition inherits noise or a consumed level from the previous one.
+    operations = {
+        "encrypt": lambda: ts.ckks_vector(ctx, vector),
+        "add": lambda: enc + enc,
+        "mul": lambda: enc * enc,
+        "sum": lambda: enc.sum(),
+        "avg": lambda: enc.sum() * (1.0 / n),
+        "dot": lambda: (enc * enc2).sum(),
+        "decrypt": lambda: enc.decrypt(),
+    }
+
+    results = harness.benchmark_operations(
+        operations, repeats=repeats, warmup=warmup,
+        memory_repeats=memory_repeats, label="TenSEAL", verbose=verbose,
+    )
 
     # Correctness checks (approximate, CKKS is not exact)
+    dec_add = (enc + enc).decrypt()
+    dec_mul = (enc * enc).decrypt()
+    dec_sum = enc.sum().decrypt()[0]
+    dec_avg = (enc.sum() * (1.0 / n)).decrypt()[0]
+    dec_dot = (enc * enc2).sum().decrypt()[0]
+
     expected_add = [v + v for v in vector]
     expected_mul = [v * v for v in vector]
     expected_sum = sum(vector)
@@ -104,29 +99,29 @@ def run_benchmark(vector: list[float]) -> dict:
     # Ciphertext size in bytes (serialized)
     results["ciphertext_bytes"] = len(enc.serialize())
 
+    # Resident memory actually held by one ciphertext. tracemalloc cannot see
+    # this — SEAL keeps the coefficients in a native heap — so this is the figure
+    # that answers "how much RAM does a ciphertext cost?".
+    results["ciphertext_rss_bytes"] = harness.measure_retained_bytes(
+        lambda: ts.ckks_vector(ctx, vector))
+
+    harness.assert_accuracy(results, ACCURACY_LIMITS, label="TenSEAL")
+
     return results
 
 
-def print_results(results: dict):
-    print("=" * 50)
-    print("TenSEAL (CKKS) Benchmark Results")
-    print("=" * 50)
-    rows = [
-        ("Encrypt",     results["encrypt_time_s"],  results["encrypt_mem_kb"]),
-        ("Add",         results["add_time_s"],       results["add_mem_kb"]),
-        ("Multiply",    results["mul_time_s"],       results["mul_mem_kb"]),
-        ("Sum",         results["sum_time_s"],       results["sum_mem_kb"]),
-        ("Average",     results["avg_time_s"],       results["avg_mem_kb"]),
-        ("Dot Product", results["dot_time_s"],       results["dot_mem_kb"]),
-        ("Decrypt",     results["decrypt_time_s"],   None),
-    ]
-    print(f"{'Operation':<14} {'Time (ms)':>10} {'Peak Mem (KB)':>14}")
-    print("-" * 42)
-    for name, t, m in rows:
-        mem_str = f"{m:>13.2f}" if m is not None else "            -"
-        print(f"{name:<14} {t*1000:>10.3f} {mem_str}")
-    print("-" * 42)
-    print(f"Ciphertext size : {results['ciphertext_bytes']} bytes")
+def print_results(results):
+    print()
+    print(harness.format_stats_table(results, OP_NAMES, "TenSEAL (CKKS) Benchmark Results"))
+    print()
+    print(f"{'Operation':<14}{'Peak Python mem (KB)':>22}")
+    print("-" * 36)
+    for name, key in OP_NAMES:
+        print(f"{name:<14}{results[f'{key}_mem_kb']:>22.2f}")
+    print("-" * 36)
+    print(f"Ciphertext size : {results['ciphertext_bytes']:,} bytes (serialized)")
+    if results.get("ciphertext_rss_bytes"):
+        print(f"Ciphertext RSS  : {results['ciphertext_rss_bytes']:,.0f} bytes resident")
     print(f"Add  max error  : {results['add_max_error']:.2e}")
     print(f"Mul  max error  : {results['mul_max_error']:.2e}")
     print(f"Sum  error      : {results['sum_error']:.2e}")
@@ -135,7 +130,12 @@ def print_results(results: dict):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="TenSEAL CKKS benchmark")
+    harness.add_repeat_arguments(parser)
+    args = parser.parse_args()
+
     DATA = [1.0, 2.0, 3.0, 4.0, 5.0]
     print(f"Input vector: {DATA}\n")
-    res = run_benchmark(DATA)
+    res = run_benchmark(DATA, repeats=args.repeats, warmup=args.warmup,
+                        memory_repeats=args.memory_repeats)
     print_results(res)
