@@ -1,0 +1,17 @@
+% Included via `pandoc -H pandoc-header.tex` when building final_report.pdf.
+
+% Pandoc wraps every image in \pandocbounded{}, which sizes it to the full text
+% width and overrides \setkeys{Gin}. The charts are wide and short (roughly
+% 2.7:1), so at full width they consume far more vertical space than their
+% content needs. Redefining the wrapper is the only way to scale them, and is
+% what keeps this report inside its page budget with all figures retained.
+\usepackage{graphicx}
+\AtBeginDocument{\renewcommand{\pandocbounded}[1]{\resizebox{0.78\linewidth}{!}{#1}}}
+
+% Place each figure where it appears in the text. Left to float, LaTeX pushes
+% these wide images to page tops and leaves gaps that cost more than the figures.
+\usepackage{float}
+\floatplacement{figure}{H}
+
+% Captions a step down from body text.
+\usepackage[font=small,skip=4pt]{caption}
