@@ -11,13 +11,19 @@
 Run from **this directory**, so the `../figures/…` image paths resolve:
 
 ```bash
-cd report
-pandoc final_report.md -o ../final_report.pdf \
-  --pdf-engine=tectonic -V geometry:margin=2.2cm -V colorlinks=true -V fontsize=10pt
+pandoc final_report.md -o ../final_report.pdf --pdf-engine=tectonic \
+  -H pandoc-header.tex -V geometry:margin=1.8cm -V colorlinks=true -V fontsize=10pt
 ```
 
 The output goes to the repository root while pandoc still runs from here, so the
 `../figures/…` image paths resolve.
+
+`pandoc-header.tex` is not optional. Pandoc wraps every image in
+`\pandocbounded{}`, which sizes it to the full text width and ignores
+`\setkeys{Gin}`; the header redefines that wrapper to scale the charts, pins
+figures where they appear in the text, and shrinks captions. Without it the
+report runs to 11 pages. The 1.8 cm margin is likewise load-bearing: at 1.85 cm
+it spills onto an eleventh page.
 
 Install the toolchain with `conda install -c conda-forge pandoc tectonic`.
 

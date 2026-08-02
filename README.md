@@ -10,7 +10,7 @@ a single average.
 
 > ## 📄 **[Read the report → `final_report.pdf`](final_report.pdf)**
 >
-> 17 pages with all figures. Markdown source: [`report/final_report.md`](report/final_report.md).
+> 10 pages with figures. Markdown source: [`report/final_report.md`](report/final_report.md).
 
 ## What is measured
 
@@ -137,12 +137,13 @@ environment does not otherwise require:
 
 ```bash
 cd report
-pandoc final_report.md -o ../final_report.pdf \
-  --pdf-engine=tectonic -V geometry:margin=2.2cm -V colorlinks=true -V fontsize=10pt
+pandoc final_report.md -o ../final_report.pdf --pdf-engine=tectonic \
+  -H pandoc-header.tex -V geometry:margin=1.8cm -V colorlinks=true -V fontsize=10pt
 ```
 
 Run it from `report/` so the `../figures/…` image paths resolve; the PDF is
-written to the repository root, where readers will look for it.
+written to the repository root. `pandoc-header.tex` scales the figures and pins
+their placement — without it the report runs to 11 pages instead of 10.
 
 Install those with `conda install -c conda-forge pandoc tectonic`. If you edit
 `final_report.md`, re-run this or the PDF will go stale.
