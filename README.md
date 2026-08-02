@@ -6,7 +6,11 @@ Ben-Gurion University of the Negev.
 
 The project measures what homomorphic encryption actually costs: runtime, memory,
 approximation error, and how all three behave on a computation more realistic than
-a single average. The write-up is in [`report/final_report.md`](report/final_report.md).
+a single average.
+
+> ## 📄 **[Read the report → `final_report.pdf`](final_report.pdf)**
+>
+> 17 pages with all figures. Markdown source: [`report/final_report.md`](report/final_report.md).
 
 ## What is measured
 
@@ -114,7 +118,7 @@ results.
 | File | Content |
 |---|---|
 | `figures/chart_operations.png` | Mean time per operation, and slowdown vs plaintext |
-| `figures/chart_memory.png` | Peak Python-side memory per operation |
+| `figures/chart_memory.png` | What `tracemalloc` sees beside what a ciphertext actually costs |
 | `figures/chart_errors.png` | CKKS approximation error per operation |
 | `figures/chart_scaling.png` | Pipeline time vs vector size |
 | `figures/chart_risk_score.png` | Risk-score stage costs, cohort distribution, accuracy |
@@ -133,11 +137,12 @@ environment does not otherwise require:
 
 ```bash
 cd report
-pandoc final_report.md -o final_report.pdf \
+pandoc final_report.md -o ../final_report.pdf \
   --pdf-engine=tectonic -V geometry:margin=2.2cm -V colorlinks=true -V fontsize=10pt
 ```
 
-Run it from `report/` so the `../figures/…` image paths resolve.
+Run it from `report/` so the `../figures/…` image paths resolve; the PDF is
+written to the repository root, where readers will look for it.
 
 Install those with `conda install -c conda-forge pandoc tectonic`. If you edit
 `final_report.md`, re-run this or the PDF will go stale.
@@ -199,13 +204,14 @@ docstring.
 
 ```
 .
+├── final_report.pdf          ← the report (start here)
 ├── run_all_benchmarks.sh     reproduce every experiment, then the charts
 ├── submit_benchmarks.sbatch  the same, on an exclusive SLURM node
 ├── src/                      benchmark and experiment code
 ├── tests/                    unit tests (40, plain unittest)
 ├── results/                  benchmark output, JSON
 ├── figures/                  generated charts, PNG
-├── report/                   final_report.md, its PDF, and the proposal
+├── report/                   final_report.md (source) and the proposal
 └── notebooks/                self-contained Colab notebook
 ```
 
@@ -218,7 +224,7 @@ Start here:
 
 | I want to… | Go to |
 |---|---|
-| Read the findings | [`report/final_report.md`](report/final_report.md) |
+| Read the findings | **[`final_report.pdf`](final_report.pdf)** |
 | Understand the measurement method | [`src/benchmark_harness.py`](src/benchmark_harness.py) |
 | See the risk score definition | [`src/synthetic_patients.py`](src/synthetic_patients.py) |
 | Reproduce the numbers | `./run_all_benchmarks.sh` |

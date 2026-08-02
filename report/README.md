@@ -3,7 +3,7 @@
 | File | Notes |
 |---|---|
 | `final_report.md` | The report. Source of truth — edit this |
-| `final_report.pdf` | Built from the markdown; regenerate after any edit |
+| [`../final_report.pdf`](../final_report.pdf) | Built from the markdown. Kept at the repository root so it is the first thing a reader sees; regenerate after any edit |
 | `project-proposal 5 - IN_DEPTH_ANALYSIS_OF_HOMOMORPHIC_ENCRYPTION_LIBRARIES.pdf` | The original project proposal |
 
 ## Rebuilding the PDF
@@ -12,9 +12,12 @@ Run from **this directory**, so the `../figures/…` image paths resolve:
 
 ```bash
 cd report
-pandoc final_report.md -o final_report.pdf \
+pandoc final_report.md -o ../final_report.pdf \
   --pdf-engine=tectonic -V geometry:margin=2.2cm -V colorlinks=true -V fontsize=10pt
 ```
+
+The output goes to the repository root while pandoc still runs from here, so the
+`../figures/…` image paths resolve.
 
 Install the toolchain with `conda install -c conda-forge pandoc tectonic`.
 
