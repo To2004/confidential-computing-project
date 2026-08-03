@@ -177,6 +177,26 @@ class TenSEALRiskScore:
     def ciphertext_bytes(self, encrypted):
         return len(encrypted[patients.FEATURES[0]].serialize())
 
+    def evaluation_key_bytes(self):
+        """Size of the evaluation keys the cloud needs before it can compute.
+
+        This is the largest object that crosses the network in the scenario, and
+        it is routinely omitted from HE cost accounting — including from earlier
+        versions of this benchmark, which measured ciphertexts meticulously and
+        never measured the keys that make them useful.
+
+        TenSEAL serializes the context; `save_secret_key=False` yields exactly
+        what a client would ship to an untrusted server: public key, Galois
+        (rotation) keys and relinearization keys, without the secret.
+        """
+        try:
+            return len(self.ctx.serialize(save_public_key=True,
+                                          save_secret_key=False,
+                                          save_galois_keys=True,
+                                          save_relin_keys=True))
+        except Exception:
+            return None
+
     def parameter_summary(self):
         cfg = CRYPTO_PARAMETERS["tenseal"]
         return {
@@ -294,6 +314,25 @@ class OpenFHERiskScore:
             first = encrypted[patients.FEATURES[0]]
             return os.path.getsize(path) if SerializeToFile(path, first, BINARY) else None
 
+    def evaluation_key_bytes(self):
+        """Size of the evaluation keys the cloud needs before it can compute.
+
+        See the TenSEAL backend's note: this is the largest object crossing the
+        network and is usually left out of HE cost accounting. OpenFHE writes the
+        multiplication and automorphism (rotation) key maps to separate files.
+        """
+        from openfhe import (BINARY, SerializeEvalAutomorphismKeyString,
+                             SerializeEvalMultKeyString)
+
+        total = 0
+        for serializer in (SerializeEvalMultKeyString,
+                           SerializeEvalAutomorphismKeyString):
+            try:
+                total += len(serializer(BINARY))
+            except Exception:
+                return None
+        return total or None
+
     def parameter_summary(self):
         cfg = CRYPTO_PARAMETERS["openfhe"]
         return {
@@ -348,6 +387,12 @@ def benchmark_backend(backend, reference_scores, repeats, warmup, memory_repeats
     if ct_bytes is not None:
         results["ciphertext_bytes_per_feature"] = ct_bytes
 
+    # The evaluation keys must reach the cloud before any ciphertext is useful,
+    # and they are typically far larger than the data itself.
+    eval_key_bytes = backend.evaluation_key_bytes()
+    if eval_key_bytes is not None:
+        results["evaluation_key_bytes"] = eval_key_bytes
+
     # Fail loudly rather than reporting timings for a circuit that silently ran
     # out of levels. A relative error above 0.1% on a 0-100 score would mean the
     # parameters are wrong, not that CKKS was noisy.
@@ -361,16 +406,32 @@ def benchmark_backend(backend, reference_scores, repeats, warmup, memory_repeats
 
 
 def plaintext_pipeline_stats(cohort, repeats, warmup, memory_repeats):
-    """The same score computed in the clear, as the overhead reference."""
+    """The same score computed in the clear, as the overhead reference.
+
+    The total sums *both* plaintext stages. An earlier version returned only
+    `score_evaluation`, which made the plaintext total smaller than one of its own
+    rows and inflated every overhead ratio built on it by roughly 2.3x.
+
+    Note what this denominator does and does not cover: the encrypted pipelines
+    also pay for encryption and decryption, which have no plaintext counterpart.
+    The resulting ratio is therefore an end-to-end *deployment* cost, not an
+    operation-for-operation comparison.
+    """
+    # The two stages must be DISJOINT to be summable. An earlier version had
+    # `cohort_mean` recompute the scores from scratch, so it contained
+    # `score_evaluation` entirely and the two could not legitimately be added.
+    scores = patients.plaintext_risk_scores(cohort)
     stages = {
         "score_evaluation": lambda: patients.plaintext_risk_scores(cohort),
-        "cohort_mean": lambda: float(np.mean(patients.plaintext_risk_scores(cohort))),
+        "cohort_mean": lambda: float(np.mean(scores)),
     }
     results = harness.benchmark_operations(
         stages, repeats=repeats, warmup=warmup,
         memory_repeats=memory_repeats, label="Plaintext",
     )
-    results["pipeline_total_ms"] = results["score_evaluation_time_stats"]["mean_ms"]
+    results["pipeline_total_ms"] = sum(
+        results[f"{stage}_time_stats"]["mean_ms"] for stage in stages
+    )
     return results
 
 

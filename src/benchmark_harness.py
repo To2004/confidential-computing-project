@@ -66,6 +66,8 @@ BOOTSTRAP_RESAMPLES = 2000
 
 _Z95 = 1.959963984540054  # two-sided 95% normal quantile
 
+SRC_ROOT = os.path.dirname(os.path.abspath(__file__))
+
 
 # ── public API ───────────────────────────────────────────────────────────────
 
@@ -97,7 +99,14 @@ def summarize(samples_s, warmup=0, bootstrap=True):
         "max_ms": ordered_ms[-1],
         "p95_ms": _percentile(ordered_ms, 95.0),
         "p99_ms": _percentile(ordered_ms, 99.0),
+        # Reported for reference only. It assumes independent samples, which
+        # timings taken back-to-back in a loop are NOT — see ci95_half_width_ms
+        # below, which is the interval this project actually reports.
+        "ci95_iid_half_width_ms": _Z95 * std_ms / (n ** 0.5) if n > 1 else 0.0,
+        # Default so `summarize` alone is usable; `time_operation` replaces this
+        # with the batch-means interval once it has the acquisition order.
         "ci95_half_width_ms": _Z95 * std_ms / (n ** 0.5) if n > 1 else 0.0,
+        "ci95_method": "iid (no acquisition order available)",
         "rel_std_pct": (std_ms / mean_ms * 100.0) if mean_ms > 0 else 0.0,
         # How far the mean sits above the median, in units of the median. A long
         # right tail shows up here; a symmetric distribution gives ~0.
@@ -145,8 +154,22 @@ def time_operation(fn, repeats=DEFAULT_REPEATS, warmup=DEFAULT_WARMUP,
             gc.enable()
 
     stats = summarize(samples_s, warmup=warmup)
-    # Drift needs the samples in acquisition order, which `summarize` sorts away.
+    # Both of these need the samples in ACQUISITION order, which `summarize`
+    # sorts away, so they are computed here from the raw sequence.
     stats.update(_drift_diagnostics(samples_s))
+
+    # The reported interval is the dependence-aware one. Falling back to the iid
+    # formula when there are too few samples to batch is flagged, so a reader can
+    # tell which one they are looking at.
+    batched = _batch_means_half_width_ms(samples_s)
+    if batched is None:
+        stats["ci95_half_width_ms"] = stats["ci95_iid_half_width_ms"]
+        stats["ci95_method"] = "iid (too few samples to batch)"
+    else:
+        stats["ci95_half_width_ms"] = batched
+        stats["ci95_method"] = "batch means (25 batches)"
+        iid = stats["ci95_iid_half_width_ms"]
+        stats["ci95_inflation_vs_iid"] = (batched / iid) if iid > 0 else None
     if keep_samples:
         stats["samples_ms"] = [round(s * 1000.0, 6) for s in samples_s]
     return stats
@@ -314,6 +337,31 @@ def environment_info():
                     break
     except OSError:
         pass
+
+    # Library versions belong in the results file, not only in the report's
+    # prose: several conclusions here are explicitly version-scoped ("in the
+    # version tested, TenSEAL's decryption is bit-deterministic"), and a results
+    # file that cannot say which version it measured cannot support them.
+    versions = {}
+    for package in ("tenseal", "openfhe", "numpy", "matplotlib"):
+        try:
+            import importlib.metadata as md
+            versions[package] = md.version(package)
+        except Exception:
+            try:
+                versions[package] = __import__(package).__version__
+            except Exception:
+                versions[package] = None
+    info["library_versions"] = versions
+
+    for key, command in (("git_commit", "git rev-parse --short HEAD"),):
+        try:
+            import subprocess
+            info[key] = subprocess.check_output(
+                command.split(), cwd=os.path.dirname(SRC_ROOT) or ".",
+                stderr=subprocess.DEVNULL, timeout=5).decode().strip()
+        except Exception:
+            info[key] = None
     return info
 
 
@@ -422,13 +470,97 @@ def _bootstrap_median_ci(sorted_values):
     return _percentile(medians, 2.5), _percentile(medians, 97.5)
 
 
-def _drift_diagnostics(samples_s):
-    """Compare the first half of the samples with the second half.
+def _lag1_autocorrelation(values):
+    """Lag-1 autocorrelation of the samples in acquisition order."""
+    n = len(values)
+    if n < 3:
+        return 0.0
+    mean = statistics.fmean(values)
+    centred = [v - mean for v in values]
+    denominator = sum(c * c for c in centred)
+    if denominator <= 0:
+        return 0.0
+    numerator = sum(centred[i] * centred[i + 1] for i in range(n - 1))
+    return numerator / denominator
 
-    Samples are in acquisition order here. A steady measurement has the two
-    halves agreeing closely; a large gap means the machine changed underneath
-    the benchmark (competing load, thermal throttling, cache warming that the
-    warm-up did not cover) and the samples are not from one distribution.
+
+def _batch_means_half_width_ms(samples_s, n_batches=25):
+    """95% interval half-width for the mean, valid under dependence.
+
+    Consecutive timings are not independent: they share cache, allocator, CPU
+    frequency and scheduler state. The textbook `s/sqrt(n)` interval assumes
+    independence, and on this project's own samples it is 2-6x too narrow
+    (lag-1 autocorrelation reaches 0.95).
+
+    Non-overlapping batch means restore validity cheaply: the mean of each
+    contiguous block is far closer to independent than the individual samples,
+    so the spread *between blocks* captures the dependence the naive formula
+    ignores. Returns None when there are too few samples to batch.
+    """
+    n = len(samples_s)
+    if n < n_batches * 4:
+        return None
+    size = n // n_batches
+    means = [statistics.fmean(samples_s[i * size:(i + 1) * size]) * 1000.0
+             for i in range(n_batches)]
+    if len(means) < 2:
+        return None
+    return _Z95 * statistics.stdev(means) / (len(means) ** 0.5)
+
+
+def _mann_kendall_z(values):
+    """Normal-approximation Mann-Kendall statistic for a monotonic trend.
+
+    The halves comparison below only sees a *step* near the midpoint. A slow
+    monotonic ramp — thermal throttling, a gradually filling allocator — halves
+    its own apparent size under that test and slips through. Mann-Kendall is
+    rank-based, needs no distributional assumption, and detects the ramp.
+
+    |z| > 1.96 corresponds to a two-sided 5% level.
+    """
+    n = len(values)
+    if n < 10:
+        return 0.0
+    # O(n log n) would need a Fenwick tree; n is 1000 here, so subsample the
+    # sequence to keep this O(m^2) check cheap without losing a monotonic signal.
+    step = max(1, n // 300)
+    sub = values[::step]
+    m = len(sub)
+    s = 0
+    for i in range(m - 1):
+        vi = sub[i]
+        for j in range(i + 1, m):
+            if sub[j] > vi:
+                s += 1
+            elif sub[j] < vi:
+                s -= 1
+    variance = m * (m - 1) * (2 * m + 5) / 18.0
+    if variance <= 0:
+        return 0.0
+    if s > 0:
+        return (s - 1) / (variance ** 0.5)
+    if s < 0:
+        return (s + 1) / (variance ** 0.5)
+    return 0.0
+
+
+def _drift_diagnostics(samples_s):
+    """Stationarity and dependence diagnostics, on samples in acquisition order.
+
+    Three complementary checks, because the first one alone is not enough:
+
+    * **halves comparison** — first half against second half. Catches a step
+      change near the midpoint. It is a display statistic, not a test: it is
+      blind to a monotonic ramp (which halves its own apparent size), to a
+      single spike, to any disturbance symmetric about the midpoint, and to
+      steady contamination present for the whole run.
+    * **Mann-Kendall** — a calibrated rank test for monotonic trend, which is
+      the case the halves comparison most often misses.
+    * **lag-1 autocorrelation** — how far the samples are from independent,
+      which is what decides whether a confidence interval on the mean is honest.
+
+    A measurement is flagged if either the halves gap exceeds the threshold or
+    the trend test is significant.
     """
     n = len(samples_s)
     if n < 4:
@@ -441,11 +573,18 @@ def _drift_diagnostics(samples_s):
         return {"drift_pct": None, "drift_flagged": False}
 
     drift_pct = (second - first) / first * 100.0
+    trend_z = _mann_kendall_z(samples_s)
+    acf1 = _lag1_autocorrelation(samples_s)
+
     return {
         "first_half_mean_ms": first * 1000.0,
         "second_half_mean_ms": second * 1000.0,
         "drift_pct": drift_pct,
-        "drift_flagged": abs(drift_pct) > DRIFT_WARN_PCT,
+        "halves_flagged": abs(drift_pct) > DRIFT_WARN_PCT,
+        "trend_z": trend_z,
+        "trend_flagged": abs(trend_z) > 1.96,
+        "lag1_autocorrelation": acf1,
+        "drift_flagged": abs(drift_pct) > DRIFT_WARN_PCT or abs(trend_z) > 1.96,
     }
 
 

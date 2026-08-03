@@ -162,15 +162,28 @@ def score_circuit(backend):
     return backend.score(backend.encrypt())
 
 
-def estimate_noise(cohort, batch_size, n_patients):
-    """Pass 1: run the circuit in noise-estimation mode and read the estimate."""
+def estimate_noise(cohort, batch_size, n_patients, repeats=10, warmup=2):
+    """Pass 1: run the circuit in noise-estimation mode and read the estimate.
+
+    The pass is also *timed*. Flooding adds a modest per-decryption cost, but it
+    also requires running the whole circuit once more beforehand — and for a
+    short-lived context that extra pass, not the flooding itself, is the dominant
+    price of the mitigation. Asserting that without measuring it would be exactly
+    the kind of unbacked claim this project is trying to avoid.
+    """
     cc, keys = build_context(batch_size,
                              noise_mode=fhe.NOISE_FLOODING_DECRYPT,
                              execution_mode=fhe.EXEC_NOISE_ESTIMATION)
     backend = make_backend(cohort, n_patients, (cc, keys))
-    result = cc.Decrypt(keys.secretKey, score_circuit(backend))
-    result.SetLength(n_patients)
-    return result.GetLogError(), cc.GetRingDimension()
+
+    def one_pass():
+        plain = cc.Decrypt(keys.secretKey, score_circuit(backend))
+        plain.SetLength(n_patients)
+        return plain
+
+    stats = harness.time_operation(one_pass, repeats=repeats, warmup=warmup,
+                                   keep_samples=False)
+    return one_pass().GetLogError(), cc.GetRingDimension(), stats
 
 
 def _spread_of(decryptions, trials):
