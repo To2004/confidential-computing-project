@@ -1,39 +1,8 @@
 """
 Encrypted evaluation of the synthetic medical risk score.
 
-The score itself is defined in `synthetic_patients.py`, which also carries the
-disclaimer: it is a synthetic construct for demonstration only and has no
-clinical meaning.
-
-Scenario
---------
-A hospital holds a cohort of patient records with five measures per patient. It
-wants a cloud provider to compute a risk score per patient and the cohort mean
-score, without ever exposing an individual value. The hospital encrypts one
-ciphertext per feature, ships them to the cloud, and the cloud evaluates the
-whole score circuit on ciphertexts. Only the hospital can decrypt.
-
-Packing
--------
-One feature per ciphertext, one CKKS slot per patient. A single homomorphic
-multiplication therefore advances all patients at once, which is what makes the
-per-patient cost of this scenario tolerable. Vectors are padded to a power of two
-because OpenFHE requires a power-of-two batch size; padding slots are filled with
-the *low end of each feature's public range*, so their normalized value is
-exactly 0 and they contribute nothing to the cohort sum. Masking them out
-afterwards would otherwise cost an extra multiplicative level.
-
-Circuit and depth
------------------
-    normalize        ct * scale + offset            (mult by constant)
-    linear terms     norm * (100 * weight)          (mult by constant)
-    interactions     norm_a * norm_b                (ct x ct)  <-- needs depth
-    quadratic        norm_bp * norm_bp              (ct x ct)  <-- needs depth
-    cohort mean      EvalSum(score) * (1 / N)       (rotations + constant)
-
-The parameters used for the primitive-operation benchmark (TenSEAL
-`[60, 40, 40, 60]`, OpenFHE depth 3) cannot run this circuit — see
-`CRYPTO_PARAMETERS` below for what it takes and why.
+The score is defined in `synthetic_patients.py`. Packing is one feature per
+ciphertext, one CKKS slot per patient, on both TenSEAL and OpenFHE.
 """
 
 import argparse
@@ -48,24 +17,13 @@ import benchmark_harness as harness
 import project_paths
 import synthetic_patients as patients
 
-# Matches the 1000 repetitions used for the primitive operations. A pipeline call
-# costs far more than a single operation, so the warm-up is shorter here: the
-# caches it exists to fill are already full after a handful of calls.
 DEFAULT_PIPELINE_REPEATS = 1000
 DEFAULT_PIPELINE_WARMUP = 20
 
-# Deeper circuit than the primitive benchmark, so both libraries need a longer
-# modulus chain, which in turn forces a larger ring dimension.
-#
-# These are the *tightest* parameters that run the whole circuit, established by
-# sweeping both libraries (see section 7 of the report):
-#   TenSEAL  3 usable levels -> "scale out of bounds"; 4 works. The 4-level chain
-#            cannot fit in poly_modulus_degree 8192 at a 128-bit security level, so
-#            the ring dimension has to double to 16384.
-#   OpenFHE  depth 3 evaluates the score but fails on the cohort mean; depth 4
-#            completes at ring dimension 16384. Depth 5 also works but pushes the
-#            ring to 32768, roughly doubling the cost of every operation for
-#            nothing — so depth 4 is deliberate, not incidental.
+# Tightest parameters that run the whole circuit: TenSEAL needs 4 usable levels
+# (3 gives "scale out of bounds"), which at 128-bit security requires
+# poly_modulus_degree 16384. OpenFHE needs depth 4; depth 3 fails on the cohort
+# mean and depth 5 pushes the ring to 32768.
 CRYPTO_PARAMETERS = {
     "tenseal": {
         "poly_modulus_degree": 16384,
@@ -80,6 +38,7 @@ CRYPTO_PARAMETERS = {
 
 
 def next_power_of_two(n):
+    """Round up to a power of two; OpenFHE requires a power-of-two batch size."""
     p = 1
     while p < n:
         p <<= 1
@@ -89,8 +48,8 @@ def next_power_of_two(n):
 def pad_features(cohort, n_slots):
     """Pad every feature column to `n_slots` with that feature's range minimum.
 
-    A padded slot normalizes to 0, so it drops out of every score term and out
-    of the cohort sum.
+    The minimum normalizes to 0, so padded slots score 0 and drop out of the
+    cohort sum. Padding with zeros would not.
     """
     padded = {}
     for name in patients.FEATURES:
@@ -104,8 +63,8 @@ def pad_features(cohort, n_slots):
 def scaled_score_weights():
     """Score weights with `SCORE_SCALE` folded in.
 
-    Folding the factor of 100 into each term's weight avoids a final
-    multiplication of the whole score by a constant, saving one level.
+    Folding it into each weight avoids a final multiply of the score by a
+    constant, saving one level.
     """
     scale = patients.SCORE_SCALE
     return (
@@ -149,7 +108,7 @@ class TenSEALRiskScore:
         """Cloud-side evaluation: normalization + all eight score terms."""
         linear_w, interaction_w, square_w = scaled_score_weights()
 
-        # Normalization, as an affine map with public constants.
+        # Normalization as an affine map with public constants.
         norm = {}
         for name in patients.FEATURES:
             scale, offset = patients.normalization_affine_terms(name)
@@ -178,16 +137,10 @@ class TenSEALRiskScore:
         return len(encrypted[patients.FEATURES[0]].serialize())
 
     def evaluation_key_bytes(self):
-        """Size of the evaluation keys the cloud needs before it can compute.
+        """Serialized size of the evaluation keys the cloud needs.
 
-        This is the largest object that crosses the network in the scenario, and
-        it is routinely omitted from HE cost accounting — including from earlier
-        versions of this benchmark, which measured ciphertexts meticulously and
-        never measured the keys that make them useful.
-
-        TenSEAL serializes the context; `save_secret_key=False` yields exactly
-        what a client would ship to an untrusted server: public key, Galois
-        (rotation) keys and relinearization keys, without the secret.
+        `save_secret_key=False` gives what a client would ship to an untrusted
+        server: public, Galois and relinearization keys, no secret key.
         """
         try:
             return len(self.ctx.serialize(save_public_key=True,
@@ -217,10 +170,9 @@ class OpenFHERiskScore:
     def __init__(self, cohort, n_patients, context=None):
         """Build the backend, optionally over a caller-supplied crypto context.
 
-        `context` is a `(crypto_context, key_pair)` pair. It exists so that
-        `ind_cpad_flooding.py` can evaluate *this* circuit under noise-flooding
-        parameters instead of reimplementing it — the security experiment and
-        the performance experiment must not be allowed to drift apart.
+        `context` is a `(crypto_context, key_pair)` pair, used by
+        `ind_cpad_flooding.py` to run this circuit under noise-flooding
+        parameters.
         """
         self.n_patients = n_patients
         self.n_slots = next_power_of_two(n_patients)
@@ -301,8 +253,7 @@ class OpenFHERiskScore:
     def ciphertext_bytes(self, encrypted):
         """Serialized size of one encrypted feature.
 
-        OpenFHE serializes to a file rather than returning bytes, so this writes
-        to a temporary file and measures it.
+        OpenFHE only serializes to a file, so write to a temp file and stat it.
         """
         import os
         import tempfile
@@ -315,11 +266,10 @@ class OpenFHERiskScore:
             return os.path.getsize(path) if SerializeToFile(path, first, BINARY) else None
 
     def evaluation_key_bytes(self):
-        """Size of the evaluation keys the cloud needs before it can compute.
+        """Serialized size of the evaluation keys the cloud needs.
 
-        See the TenSEAL backend's note: this is the largest object crossing the
-        network and is usually left out of HE cost accounting. OpenFHE writes the
-        multiplication and automorphism (rotation) key maps to separate files.
+        OpenFHE keeps the multiplication and automorphism (rotation) key maps
+        separate, so both are measured and summed.
         """
         from openfhe import (BINARY, SerializeEvalAutomorphismKeyString,
                              SerializeEvalMultKeyString)
@@ -364,7 +314,6 @@ def benchmark_backend(backend, reference_scores, repeats, warmup, memory_repeats
         memory_repeats=memory_repeats, label=backend.name,
     )
 
-    # Accuracy of the decrypted result against the plaintext reference.
     decrypted_scores = backend.decrypt_scores(encrypted_score)
     decrypted_mean = backend.decrypt_mean(encrypted_mean)
     reference_mean = float(np.mean(reference_scores))
@@ -387,15 +336,12 @@ def benchmark_backend(backend, reference_scores, repeats, warmup, memory_repeats
     if ct_bytes is not None:
         results["ciphertext_bytes_per_feature"] = ct_bytes
 
-    # The evaluation keys must reach the cloud before any ciphertext is useful,
-    # and they are typically far larger than the data itself.
     eval_key_bytes = backend.evaluation_key_bytes()
     if eval_key_bytes is not None:
         results["evaluation_key_bytes"] = eval_key_bytes
 
-    # Fail loudly rather than reporting timings for a circuit that silently ran
-    # out of levels. A relative error above 0.1% on a 0-100 score would mean the
-    # parameters are wrong, not that CKKS was noisy.
+    # Above 0.1% relative error on a 0-100 score means the circuit ran out of
+    # levels, not that CKKS was noisy, so abort instead of reporting timings.
     harness.assert_accuracy(
         results,
         {"score_max_rel_error": 1e-3, "cohort_mean_abs_error": 1e-1},
@@ -406,22 +352,21 @@ def benchmark_backend(backend, reference_scores, repeats, warmup, memory_repeats
 
 
 def plaintext_pipeline_stats(cohort, repeats, warmup, memory_repeats):
-    """The same score computed in the clear, as the overhead reference.
+    """Plaintext reference for the overhead denominator.
 
-    The total sums *both* plaintext stages. An earlier version returned only
-    `score_evaluation`, which made the plaintext total smaller than one of its own
-    rows and inflated every overhead ratio built on it by roughly 2.3x.
-
-    Note what this denominator does and does not cover: the encrypted pipelines
-    also pay for encryption and decryption, which have no plaintext counterpart.
-    The resulting ratio is therefore an end-to-end *deployment* cost, not an
-    operation-for-operation comparison.
+    `full_pipeline` computes exactly what the encrypted pipeline produces: a
+    score per patient and the cohort mean. It is the denominator for the
+    overhead ratio. The two sub-stages are timed separately for the breakdown
+    table only; they overlap (`cohort_mean` needs the scores) and must not be
+    summed.
     """
-    # The two stages must be DISJOINT to be summable. An earlier version had
-    # `cohort_mean` recompute the scores from scratch, so it contained
-    # `score_evaluation` entirely and the two could not legitimately be added.
+    def full_pipeline():
+        scores = patients.plaintext_risk_scores(cohort)
+        return float(np.mean(scores))
+
     scores = patients.plaintext_risk_scores(cohort)
     stages = {
+        "full_pipeline": full_pipeline,
         "score_evaluation": lambda: patients.plaintext_risk_scores(cohort),
         "cohort_mean": lambda: float(np.mean(scores)),
     }
@@ -429,9 +374,7 @@ def plaintext_pipeline_stats(cohort, repeats, warmup, memory_repeats):
         stages, repeats=repeats, warmup=warmup,
         memory_repeats=memory_repeats, label="Plaintext",
     )
-    results["pipeline_total_ms"] = sum(
-        results[f"{stage}_time_stats"]["mean_ms"] for stage in stages
-    )
+    results["pipeline_total_ms"] = results["full_pipeline_time_stats"]["mean_ms"]
     return results
 
 

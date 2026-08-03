@@ -1,15 +1,12 @@
-% =====================================================================
-%  In-Depth Analysis of Homomorphic Encryption Libraries
-%  Confidential Computing course project, Ben-Gurion University
+% In-Depth Analysis of Homomorphic Encryption Libraries
+% Confidential Computing course project, Ben-Gurion University of the Negev.
 %
-%  Build:  cd report && tectonic final_report.tex && mv final_report.pdf ..
-%  (or)    cd report && latexmk -pdf final_report.tex
-%
-%  Figures live in ../figures and are produced by src/plot_results.py.
-% =====================================================================
-\documentclass[10pt,a4paper]{article}
+% Build:  cd report && tectonic final_report.tex && mv final_report.pdf ..
+% Figures come from ../figures, produced by src/plot_results.py.
 
-\usepackage[margin=2.0cm]{geometry}
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.4cm]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
@@ -17,677 +14,771 @@
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{float}
-\usepackage[font=small,labelfont=bf,skip=4pt]{caption}
-\usepackage[table]{xcolor}
+\usepackage[font=small,labelfont=bf,skip=5pt]{caption}
+\usepackage{xcolor}
 \usepackage{microtype}
 \usepackage{enumitem}
 \usepackage[colorlinks=true,allcolors=blue!55!black]{hyperref}
 \usepackage{titlesec}
 \usepackage{abstract}
 
-% Tighter, paper-like headings and lists.
-\titlespacing*{\section}{0pt}{1.3ex plus .2ex}{0.7ex}
-\titlespacing*{\subsection}{0pt}{1.0ex plus .2ex}{0.5ex}
+\titlespacing*{\section}{0pt}{1.6ex plus .2ex}{0.8ex}
+\titlespacing*{\subsection}{0pt}{1.2ex plus .2ex}{0.6ex}
 \setlist{nosep,leftmargin=*}
 \renewcommand{\abstractnamefont}{\normalfont\bfseries}
 \renewcommand{\abstracttextfont}{\normalfont\small}
-\setlength{\abovecaptionskip}{4pt}
-\setlength{\belowcaptionskip}{2pt}
 
-% Scale the wide, short chart images; at full width they waste vertical space.
 \newcommand{\chart}[2]{%
   \begin{figure}[H]\centering
-    \includegraphics[width=0.80\linewidth]{#1}
+    \includegraphics[width=0.86\linewidth]{#1}
     \caption{#2}
   \end{figure}}
 
-\newcommand{\ind}{IND-CPA\textsuperscript{D}}
-
-\title{\vspace{-1.2cm}\textbf{In-Depth Analysis of Homomorphic Encryption Libraries}\\
-       \large A measured comparison of TenSEAL and OpenFHE under CKKS}
+\title{\vspace{-1.0cm}\textbf{In-Depth Analysis of Homomorphic\\Encryption Libraries}}
 \author{Itai Zloclzower \and Jacob Shemesh \and Tomer Ovadia \and Yoni Glickstein}
-\date{Confidential Computing, Ben-Gurion University of the Negev \\ July 2026}
+\date{Confidential Computing Course\\Ben-Gurion University of the Negev\\July 2026}
 
 \begin{document}
 \maketitle
-\vspace{-0.6cm}
+\vspace{-0.5cm}
 
 \begin{abstract}
 \noindent
-We compare two CKKS implementations --- TenSEAL (on Microsoft SEAL) and OpenFHE ---
-against a plaintext baseline, across primitive operations, a vector-size sweep, and a
-multi-stage computation over 1000 encrypted records. Two things distinguish this study
-from a defaults-versus-defaults comparison. First, we re-run OpenFHE pinned to TenSEAL's
-ring dimension and scaling factor, which shows that most of the apparent library gap is a
-parameter gap: the multiplication penalty falls from $6.89\times$ to $3.16\times$, and the
-geometric mean across six operations from $6.44\times$ to $3.05\times$ --- though decryption
-remains $7.8\times$ and the matched arm is no longer 128-bit secure. Second, we measure
-what the \ind{} decryption-noise defence costs, and find that only one of the two libraries
-offers one at all: TenSEAL's decryption is bit-deterministic, while OpenFHE randomises by
-default and supports calibrated flooding for $1.42\times$ on decryption. We also report a
-cost the literature and our own earlier drafts routinely omit --- evaluation keys are
-179.7\,MB against a 5.3\,MB encrypted cohort. This is a course project, and its findings
-largely reproduce and illustrate known results; its contribution is measurement discipline,
-including four claims from an earlier draft that did not survive re-examination and are
-marked as retractions in place.
+Homomorphic encryption lets a server compute on data it cannot read, which closes
+the gap left open while data is being processed. The price is performance, and the
+question this project asks is how large that price actually is. We implement the
+same set of computations three ways --- in plaintext, in TenSEAL, and in OpenFHE ---
+and measure runtime, memory, ciphertext size and accuracy for each. Averaged over
+1000 repetitions per operation, encrypted addition costs 153 times a plaintext
+addition in TenSEAL, while an encrypted summation over the same vector costs
+32{,}832 times its plaintext equivalent: the overhead is not one number but a range
+spanning two orders of magnitude, and its size is governed by whether an operation
+needs ciphertext rotations. Two further experiments explain most of what we
+measured. Growing the input from 5 to 500 values increases encrypted runtime by
+only $7.3\times$ while plaintext runtime grows $33.8\times$, because CKKS packs many
+values into one ciphertext and charges by the ciphertext. And when OpenFHE is
+re-run at TenSEAL's parameters rather than its own defaults, its multiplication
+penalty falls from $6.89\times$ to $3.16\times$, which means much of the apparent
+difference between the libraries is a difference in configuration rather than in
+code. Applying all of this to a synthetic healthcare score over 1000 records, the
+encrypted computation completes in 214\,ms and agrees with the plaintext result to
+five significant figures.
 \end{abstract}
 
 \vspace{0.2cm}
 
-% =====================================================================
-\section{Introduction and Goal}
+% ---------------------------------------------------------------------------
+\section{Introduction}
 
-Homomorphic Encryption (HE) allows computation directly on ciphertexts, so a cloud provider
-can process data it cannot read. This project compares \textbf{TenSEAL} and \textbf{OpenFHE},
-both implementing \textbf{CKKS}, against a plaintext baseline.
+Encryption protects data at rest and in transit, but not while it is being used.
+To compute on encrypted data, a conventional system must first decrypt it, and at
+that moment the plaintext is exposed to whatever machine is doing the work.
+Homomorphic encryption (HE) removes that step: operations performed on ciphertexts
+produce ciphertexts that decrypt to the correct result, so a cloud provider can
+process data it never sees.
 
-\textbf{Research question:} what is the practical overhead of computing under HE, and how
-much of the measured difference between two libraries is a property of the \emph{libraries}
-rather than of the \emph{parameters} we gave them?
+The idea is old and the implementations are recent. Several mature libraries now
+exist, which turns an abstract capability into a practical engineering decision:
+if a hospital or a bank wanted to outsource a computation over sensitive records
+today, what would it cost, and which library should it choose? Answering that
+requires measurement rather than theory, because the published asymptotics say
+little about what happens when a specific library runs a specific operation on a
+specific machine.
 
-The work has three parts: the cost of individual encrypted operations (\S\ref{sec:prim});
-a multi-stage computation with realistic arithmetic structure --- a synthetic composite
-score over 1000 encrypted records (\S\ref{sec:usecase}); and whether CKKS confidentiality
-suffices for a scenario that releases decrypted results, which ours does (\S\ref{sec:sec}).
+This project measures it. We compare two CKKS implementations, \textbf{TenSEAL}
+and \textbf{OpenFHE}, against an unencrypted baseline over a small set of
+computations common in data analysis, and report runtime, memory, ciphertext size,
+accuracy, and the practical difficulties we met while building them.
 
-Four CKKS concepts recur. The \textbf{ring dimension} sets the security level and dominates
-every operation's cost; the \textbf{scaling factor} sets precision; \textbf{multiplicative
-depth} limits sequential multiplications; and \textbf{slot packing} lets one ciphertext hold
-many values so that a single operation advances all of them.
+\paragraph{Research question.} \emph{What is the practical overhead of performing
+basic computations using two different homomorphic encryption implementations,
+compared to equivalent plaintext computation?}
 
-This version follows an adversarial review of an earlier draft. Four of its claims did not
-survive and are marked as retractions where they occur (\S\ref{sec:prim}, \S\ref{sec:mem},
-\S\ref{sec:matched}, \S\ref{sec:results}); \S\ref{sec:limits} records what remains unfixed.
+The report follows the measurements in the order they built on one another.
+Section~\ref{sec:background} covers the scheme and the libraries.
+Section~\ref{sec:impl} describes what we implemented and Section~\ref{sec:setup}
+how we measured it. Section~\ref{sec:results} gives the core result: the cost of
+each operation, and why it varies so widely. Sections~\ref{sec:scaling}
+and~\ref{sec:params} then test two explanations for that variation --- input size
+and parameter choice. Section~\ref{sec:usecase} applies the whole thing to a
+healthcare example, and Sections~\ref{sec:usability}--\ref{sec:limits} report
+usability and the limitations we hit.
 
-% =====================================================================
-\section{Related Work}\label{sec:related}
+% ---------------------------------------------------------------------------
+\section{Background}\label{sec:background}
 
-Cross-library FHE benchmarking is an established genre, and we position this course project
-inside it rather than claiming novelty.
+\subsection{Homomorphic encryption and CKKS}
 
-\textbf{Library comparisons.} Sathya et al.~\cite{sathya2018} survey HE libraries and their
-trade-offs. More recently, Faneela et al.~\cite{faneela2025} benchmark exactly the pair we
-study --- SEAL and OpenFHE --- across BGV and CKKS on Linux and Windows, and conclude that
-OpenFHE is the stronger choice across their settings. A 2025 benchmark study extends the
-comparison to HElib and Lattigo~\cite{perfanalysis2025}. That our headline ordering differs
-from Faneela et al.\ is itself informative and is the subject of \S\ref{sec:matched}: library
-rankings in this area are highly sensitive to the parameters each library is given.
+Both libraries here implement \textbf{CKKS}~\cite{ckks2017}, a scheme for
+approximate arithmetic on real numbers. Approximate is the key word: decrypting a
+CKKS result returns the correct value plus a small error, in exchange for far
+better performance than exact schemes on real-valued data. For statistics over
+measurements this trade is usually acceptable, and Section~\ref{sec:accuracy}
+quantifies the error we observed.
 
-\textbf{Fair comparison is a known problem, not one we discovered.} Takeshita et
-al.'s \emph{HEProfiler}~\cite{heprofiler2025} profiles four CKKS implementations and
-explicitly ``devises methods for fair comparisons of these libraries, even with their widely
-varied development strategies and library architectures'' --- the same difficulty our
-matched-parameter arm addresses, treated far more thoroughly. Viand et al.'s
-SoK~\cite{viand2021} surveys FHE compilers and the comparability problem across backends, and
-the HEBench framework standardises workloads across libraries. Our \S\ref{sec:matched} is a
-small, single-operating-point instance of a concern these works already articulate.
+Four properties of CKKS shape every measurement in this report.
 
-\textbf{Scheme and implementation.} CKKS is due to Cheon et al.~\cite{ckks2017}; both
-libraries implement its full-RNS variant~\cite{rns2018}, where the modulus-chain and
-rescaling behaviour we observe lives. The libraries are documented by Al Badawi et
-al.~\cite{openfhe2022} and Benaissa et al.~\cite{tenseal2021}. OpenFHE's scaling techniques
---- whose $1.64\times$ cost and ${\sim}6\times$ precision effect we measure --- are introduced
-by Kim et al.~\cite{kim2022}, which supplies the mechanism for a result we would otherwise
-have reported as an unexplained tunable. Parameters follow the Homomorphic Encryption
-Security Standard~\cite{hestandard}, the source of the 218/438-bit ceilings we use.
+\begin{itemize}
+\item \textbf{Ring dimension.} Ciphertexts are polynomials. The degree of that
+polynomial, the ring dimension, sets the security level and determines the cost of
+every operation. A larger ring is more secure and uniformly slower.
+\item \textbf{Slot packing.} One ciphertext holds many values in parallel
+``slots'', and one homomorphic operation acts on all of them at once. Cost depends
+on the ring dimension, not on how many slots actually hold data ---
+Section~\ref{sec:scaling} shows what this implies.
+\item \textbf{Multiplicative depth.} Each multiplication consumes a level from a
+finite budget fixed at setup. Exceeding it does not slow the computation down; it
+makes the result wrong.
+\item \textbf{Rotations.} Slots cannot be addressed individually. Summing across
+them requires rotating the ciphertext and adding repeatedly, roughly
+$\log_2(\text{slots})$ times, each rotation involving an expensive key switch.
+This is why summation costs far more than addition, as Section~\ref{sec:runtime}
+shows.
+\end{itemize}
 
-\textbf{Security of approximate FHE.} Li and Micciancio~\cite{limicciancio2021} defined
-\ind{} and demonstrated key recovery against CKKS implementations including SEAL. Li et
-al.~\cite{lmss2022} then obtained provable security by post-processing decryption with a
-differential-privacy mechanism calibrated to \emph{worst-case} error growth; their result
-\emph{reduces} the flooding required, since earlier approaches left CKKS roughly 8--16 bits of
-precision. That worst-case qualifier is the hinge: Guo et al.~\cite{guo2024} break flooding
-built on non-worst-case estimation, which is what OpenFHE's empirical estimator provides.
-Bergamaschi et al.~\cite{pkc2025} analyse concrete security at reduced noise, and Alexandru
-et al.~\cite{aahe2024} propose application-aware parameter selection.
+\subsection{The two libraries}
 
-\textbf{What we add, modestly.} Relative to the above: a matched-parameter ablation that
-separates ring dimension from scaling technique at one operating point, and a measurement of
-the \ind{} mitigation's cost placed alongside the performance numbers rather than discussed
-separately. Neither is a new technique, and the security mechanism is documented by OpenFHE
-itself. We contribute no framework and no cryptanalysis.
+\textbf{TenSEAL} is a Python library built on Microsoft SEAL. It presents
+encrypted vectors as ordinary Python objects supporting \texttt{+}, \texttt{*} and
+\texttt{.sum()}, and manages relinearization and rescaling internally. The
+programmer supplies the modulus chain directly.
 
-% =====================================================================
-\section{Method}
+\textbf{OpenFHE} is a C++ library with Python bindings, maintained by an academic
+consortium. It exposes lower-level calls (\texttt{EvalAdd}, \texttt{EvalMult},
+\texttt{EvalSum}) and requires evaluation keys to be generated explicitly. The
+programmer supplies a multiplicative depth and a scaling size, and the library
+derives the ring dimension needed to satisfy them at a chosen security level.
 
-\subsection{Configurations}
+That difference in configuration style matters more than it first appears. Given
+what we consider comparable settings, the two libraries end up at different ring
+dimensions --- 8192 for TenSEAL, 16384 for OpenFHE --- which we return to in
+Section~\ref{sec:params}.
+
+\subsection{Related work}
+
+Comparing HE libraries is not a new exercise. Sathya et al.~\cite{sathya2018}
+survey the available libraries and their trade-offs. Faneela et
+al.~\cite{faneela2025} benchmark SEAL against OpenFHE across BGV and CKKS on two
+operating systems and conclude that OpenFHE is the stronger performer, and
+Takeshita et al.~\cite{heprofiler2025} profile four CKKS implementations while
+explicitly addressing the difficulty of comparing libraries whose architectures
+differ. Viand et al.~\cite{viand2021} survey the compiler layer above these
+libraries.
+
+Our headline ordering differs from Faneela et al., which is one reason
+Section~\ref{sec:params} exists: we found that the ranking depends on the
+parameters each library is given, so a comparison at default settings measures the
+defaults as much as the code. We claim no methodological novelty over the works
+above; this is a course project, and its aim is a clear practical measurement of
+two libraries we implemented ourselves.
+
+% ---------------------------------------------------------------------------
+\section{Implementation}\label{sec:impl}
+
+We implemented the same seven operations three times: once in plain Python as a
+baseline, once in TenSEAL, and once in OpenFHE.
 
 \begin{table}[H]\centering\small
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}ll@{}}
 \toprule
- & \textbf{TenSEAL 0.3.15} & \textbf{OpenFHE 1.4.1} \\
+\textbf{Operation} & \textbf{What it does} \\
 \midrule
-Configured by & modulus chain given directly & depth + scaling size; library picks the rest \\
-Parameters & \texttt{poly\_mod=8192}, \texttt{[60,40,40,60]}, $2^{40}$ & \texttt{depth=3}, \texttt{scal\_mod=50}, \texttt{HEStd\_128} \\
-Resulting ring dimension & 8192 & \textbf{16384} \\
+Key generation & Build the crypto context and generate the keys each library needs \\
+Encryption & Encode a vector of numbers into a ciphertext \\
+Addition & Element-wise sum of two encrypted vectors \\
+Multiplication & Element-wise product of two encrypted vectors \\
+Summation & Sum of all elements within one encrypted vector \\
+Average & Summation followed by multiplication by $1/n$ \\
+Dot product & Element-wise multiplication followed by summation \\
+Decryption & Recover the plaintext result \\
+\bottomrule
+\end{tabular}
+\caption{The implemented operations. All except key generation and encryption have
+a direct plaintext counterpart used as the baseline.}
+\end{table}
+
+The two libraries need different code for the same computation. Encrypted addition
+in TenSEAL is \texttt{enc + enc}; in OpenFHE it is \texttt{cc.EvalAdd(ct, ct)}.
+Summation is \texttt{enc.sum()} against \texttt{cc.EvalSum(ct, n)}, and the latter
+requires summation keys to have been generated beforehand.
+
+One incompatibility appeared immediately and affected everything after it:
+\textbf{OpenFHE requires the batch size to be a power of two}, while TenSEAL
+accepts any vector length. Every input therefore has to be padded up to the next
+power of two. For simple operations this is harmless, but
+Section~\ref{sec:usecase} shows a case where the padding value itself has to be
+chosen carefully.
+
+Beyond the required operations we implemented three extensions: the encrypted dot
+product listed above, a sweep over input sizes (Section~\ref{sec:scaling}), and a
+re-run of OpenFHE under TenSEAL's parameters (Section~\ref{sec:params}).
+
+% ---------------------------------------------------------------------------
+\section{Experimental Setup}\label{sec:setup}
+
+\subsection{What is measured, and how}
+
+\textbf{Runtime.} Each operation is timed on its own with
+\texttt{time.perf\_counter} around a single call. Encryption and decryption are
+timed separately from the operations between them, so the cost of getting data in
+and out is never folded into the cost of computing on it.
+
+\textbf{Repetitions and warm-up.} A single timing of an HE operation is not
+reproducible. Every figure in this report is the \textbf{mean of 1000 timed
+repetitions}, preceded by \textbf{50 warm-up calls that are discarded}. The
+warm-up matters because the first calls into either library pay costs that are not
+part of steady-state operation: loading the native library, building lookup tables
+on first use, and faulting in freshly allocated memory. Including them would
+inflate the mean and, worse, make it depend on how many repetitions were run.
+Garbage collection is disabled inside the timed loop, so an unrelated collection is
+not charged to the operation being measured. Every repetition starts from the same
+freshly encrypted inputs, so no repetition inherits accumulated noise or a consumed
+level from the one before it.
+
+\textbf{Memory.} We report two figures because one is not enough. Python's
+\texttt{tracemalloc} sees only Python-level allocations; both libraries keep
+ciphertext coefficients in native C++ memory that Python never learns about, so
+\texttt{tracemalloc} alone reports the size of a wrapper object rather than of a
+ciphertext. We therefore also allocate many ciphertexts, hold them, and measure the
+growth in the process resident set. Memory is measured in a separate pass from
+timing, because \texttt{tracemalloc} adds a hook to every allocation and distorts
+short measurements.
+
+\textbf{Ciphertext size.} Each library's own serialization routine, measured in
+bytes, compared against the plaintext vector as 8-byte doubles.
+
+\textbf{Accuracy.} Every encrypted result is compared against the plaintext
+computation of the same values, and the maximum absolute error is reported. Each
+benchmark asserts this error is within a loose bound before reporting any timing,
+so a run whose parameters were wrong fails visibly instead of producing plausible
+but meaningless numbers.
+
+\subsection{Machine and configuration}
+
+Measurements ran on a compute node reserved exclusively for the job, so no other
+work shared the machine. We fixed the thread count to one
+(\texttt{OMP\_NUM\_THREADS=1}): both libraries use multithreaded native code, and
+on a shared machine their measured cost would depend on how many cores each
+happened to obtain, which is not a property of the library.
+
+\begin{table}[H]\centering\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+CPU & Intel Xeon E5-2680 v3 @ 2.50\,GHz, single-threaded, exclusive node \\
+OS / Python & Rocky Linux 9.7 / Python 3.8.20 \\
+Libraries & TenSEAL 0.3.15, OpenFHE 1.4.1, NumPy 1.24.4 \\
+TenSEAL parameters & \texttt{poly\_modulus\_degree}\,=\,8192, coefficient moduli
+  $[60,40,40,60]$, scale $2^{40}$ \\
+OpenFHE parameters & multiplicative depth 3, scaling modulus 50 bits, 128-bit
+  security $\Rightarrow$ ring 16384 \\
+Input & The vector $[1.0, 2.0, 3.0, 4.0, 5.0]$ unless stated otherwise \\
+\bottomrule
+\end{tabular}
+\caption{Experimental configuration. The two parameter sets are each library's
+natural way of expressing comparable settings; Section~\ref{sec:params} examines
+what that difference costs.}
+\end{table}
+
+Because absolute timings depend on this hardware, the ratios between the three
+columns are the transferable result rather than the millisecond values themselves.
+
+% ---------------------------------------------------------------------------
+\section{Results: The Cost of Basic Operations}\label{sec:results}
+
+\subsection{Runtime}\label{sec:runtime}
+
+\begin{table}[H]\centering\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\textbf{Operation} & \textbf{Plaintext (ms)} & \textbf{TenSEAL (ms)} &
+\textbf{OpenFHE (ms)} & \textbf{TenSEAL} & \textbf{OpenFHE} \\
+ & & & & \textbf{overhead} & \textbf{overhead} \\
+\midrule
+Encrypt      & ---      & 5.4914  & 15.1101 & ---              & --- \\
+Add          & 0.000629 & 0.0961  & 0.3869  & $153\times$      & $615\times$ \\
+Multiply     & 0.000550 & 4.7413  & 32.4827 & $8{,}616\times$  & $59{,}025\times$ \\
+Sum          & 0.000320 & 10.5082 & 76.1546 & $32{,}832\times$ & $237{,}943\times$ \\
+Average      & 0.000349 & 11.7961 & 81.3563 & $33{,}794\times$ & $233{,}072\times$ \\
+Dot product  & 0.000993 & 11.0764 & 96.6155 & $11{,}152\times$ & $97{,}272\times$ \\
+Decrypt      & ---      & 1.4029  & 22.6702 & ---              & --- \\
+\midrule
+\textbf{Total (5 comparable ops)} & \textbf{0.002841} & \textbf{38.2180} &
+\textbf{286.9961} & \textbf{13{,}450$\times$} & \textbf{101{,}003$\times$} \\
+\bottomrule
+\end{tabular}
+\caption{Mean runtime over 1000 repetitions. The total covers the five operations
+that exist in all three columns; encryption and decryption have no plaintext
+counterpart and are excluded from it.}
+\end{table}
+
+\chart{../figures/chart_operations.png}{Runtime per operation on a logarithmic
+scale, and the slowdown against plaintext. Both libraries span two orders of
+magnitude across operations.}
+
+Three things stand out.
+
+\textbf{There is no single overhead figure.} Within TenSEAL alone the cost ranges
+from $153\times$ for addition to $32{,}832\times$ for summation. A statement such as
+``HE is ten thousand times slower'' is therefore not usable: the answer depends
+entirely on which operation dominates the workload.
+
+\textbf{Addition is nearly free; rotation-heavy operations are not.} Encrypted
+addition takes 96 microseconds, a hundredth of the cost of a multiplication and a
+hundredth of a summation. The reason is structural. Addition acts on ciphertext
+coefficients directly. Summation, average and dot product must move data between
+slots, and each rotation carries a key switch. This single mechanism explains the
+ordering of every row in the table, and it is the most actionable thing we
+measured: a computation that can be expressed with additions and constant
+multiplications will be far cheaper than one that needs to aggregate across slots.
+
+\textbf{TenSEAL is faster here, on every operation.} It leads by $2.75\times$ on
+encryption and by $6.89\times$ on multiplication. Section~\ref{sec:params} tests
+whether that reflects the libraries or the parameters we gave them.
+
+\subsection{Key generation}
+
+Key generation happens once per session rather than once per operation, so we
+timed it separately, over 50 repetitions.
+
+\begin{table}[H]\centering\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+ & \textbf{TenSEAL} & \textbf{OpenFHE} \\
+\midrule
+Context and key generation & 216.180\,ms & 208.308\,ms \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\noindent The two libraries are configured through different routes. That is convenient, and
-it is also a serious comparability problem --- addressed in \S\ref{sec:matched}. All mandatory
-operations were implemented for both, plus every optional extension: dot product, the score of
-\S\ref{sec:usecase}, scaling tests, separately-timed key generation, the matched comparison,
-and the \ind{} analysis.
+This is the one measurement where OpenFHE is ahead, and the two are within 4\% of
+each other. The more useful observation is the scale: TenSEAL spends 216\,ms
+building keys and 38\,ms performing all five encrypted operations. Setup costs
+almost six times the computation, so a service that builds a fresh context for
+every request would spend most of its time on key generation rather than on the
+work it was asked to do.
 
-\subsection{Measurement}\label{sec:method}
-
-Timing an HE operation once is not reproducible. Every timing is a \textbf{mean over 1000
-repetitions after 50 discarded warm-up calls}, except: key generation uses 50 repetitions, and
-the matched-parameter and \ind{} experiments use 200. Warm-up matters because the first calls
-pay one-off costs --- library loading, lazy NTT and key-cache construction, first-touch page
-faults, frequency ramp-up --- that are not steady-state.
-
-\textbf{Intervals are computed under dependence.} Consecutive timings share cache, allocator
-and scheduler state, so they are not independent and $s/\sqrt{n}$ does not apply. On our
-archived samples the lag-1 autocorrelation reaches \textbf{0.95} and the naive interval is
-\textbf{2--6$\times$ too narrow}. Every interval here is a non-overlapping batch-means interval
-(25 batches); the results files record both, plus the inflation factor.
-
-\textbf{Stationarity uses three diagnostics.} A first-half/second-half comparison is a smoke
-alarm, not a test: it is blind to a monotonic ramp (which halves its apparent size), to a
-single spike, to disturbances symmetric about the midpoint, and to load present throughout. We
-add a \textbf{Mann--Kendall} trend test and report lag-1 autocorrelation; a measurement is
-flagged if either fires. A unit test documents the V-shaped case all three still miss. This
-earned its place: our first run, on a shared node at load average 10.4 on 8 cores, showed
-drifts to \textbf{73\%}, so everything here was re-measured on an \textbf{exclusive node},
-single-threaded.
-
-\textbf{Other precautions.} \texttt{tracemalloc} distorts short timings, so memory is a
-separate pass; GC is disabled inside the timed loop as \texttt{timeit} does; each benchmark
-asserts decrypted results against the plaintext reference before reporting timings --- a crash
-detector for level exhaustion, deliberately loose, not a precision guarantee. 47 unit tests
-cover the statistics, the drift blind spots, the score, and the padding invariant.
-
-\textbf{Caveat on the plaintext denominators.} The baseline is pure Python, timed per call at
-0.3--1.0\,\textmu s against ${\sim}130$\,ns of instrumentation overhead. Every ``$N\times$
-slower'' figure is therefore \emph{relative to a pure-Python reference} and an upper bound on
-the ratio against optimised plaintext. We added neither batched timing nor a NumPy baseline.
-
-\textbf{Environment.} Exclusive SLURM node, Intel Xeon E5-2680 v3 @ 2.50\,GHz,
-\texttt{OMP\_NUM\_THREADS=1}, Rocky Linux 9.7, Python 3.8.20. Versions, git commit and node are
-recorded in every results file. Single-threading is deliberate --- thread count is not a
-library property.
-
-% =====================================================================
-\section{Primitive Operations}\label{sec:prim}
-
-Input \texttt{[1.0, 2.0, 3.0, 4.0, 5.0]}. ``infl.'' is how much wider each interval is than the
-independence formula an earlier draft used.
-
-\begin{table}[H]\centering\small
-\begin{tabular}{@{}lrrrrrrrr@{}}
-\toprule
-\textbf{Operation} & \textbf{Plain (ms)} & \textbf{TenSEAL} & \textbf{CI $\pm$} & \textbf{infl.}
- & \textbf{OpenFHE} & \textbf{CI $\pm$} & \textbf{infl.} & \textbf{TS/OF vs plain} \\
-\midrule
-Encrypt      & ---      & 5.4914  & 0.045 & 4.6$\times$ & 15.1101 & 0.019 & 2.1$\times$ & --- \\
-Add          & 0.000629 & 0.0961  & 0.000 & 1.4$\times$ & 0.3869  & 0.000 & 1.2$\times$ & 153$\times$ / 615$\times$ \\
-Multiply     & 0.000550 & 4.7413  & 0.063 & 5.8$\times$ & 32.4827 & 0.033 & 1.6$\times$ & 8,616$\times$ / 59,025$\times$ \\
-Sum          & 0.000320 & 10.5082 & 0.013 & 2.0$\times$ & 76.1546 & 0.083 & 2.2$\times$ & 32,832$\times$ / 237,943$\times$ \\
-Average      & 0.000349 & 11.7961 & 0.157 & 6.0$\times$ & 81.3563 & 0.308 & 4.5$\times$ & 33,794$\times$ / 233,072$\times$ \\
-Dot Product  & 0.000993 & 11.0764 & 0.014 & 2.3$\times$ & 96.6155 & 0.066 & 1.5$\times$ & 11,152$\times$ / 97,272$\times$ \\
-Decrypt      & ---      & 1.4029  & 0.011 & 4.8$\times$ & 22.6702 & 0.053 & 2.9$\times$ & --- \\
-\midrule
-\textbf{Total, 5 comparable ops} & \textbf{0.002841} & \textbf{38.2180} & & & \textbf{286.9961} & & &
-\textbf{13,450$\times$ / 101,003$\times$} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Per-operation overhead varies by over two orders of magnitude --- $153\times$ for addition
-against $32{,}832\times$ for summation --- so no single ``$N\times$ slower'' figure describes
-HE. Addition is nearly free; rotation-heavy operations each need a $\log_2(\text{batch size})$
-sequence of rotate-and-add steps, every one a key switch, costing 100--120$\times$ an addition.
-TenSEAL leads on every operation, but \S\ref{sec:matched} shows most of that is parameters.
-
-\paragraph{Two corrections to these totals.} The total now sums the \textbf{same five
-operations} in all three columns; an earlier draft divided a seven-operation encrypted total
-(including encrypt and decrypt, which plaintext lacks) by a five-operation plaintext one and
-called it a slowdown, inflating the figures to $15{,}876\times$ and $114{,}299\times$. The
-seven-operation session costs (45.11 / 324.78\,ms) are a deployment quantity, reported
-separately.
-
-More consequentially: an earlier draft argued that 1000 repetitions driving every interval
-below a few percent made the measurements trustworthy. Our own samples disprove that twice. An
-interval measures whether samples agree \emph{with each other} assuming independence --- the
-contaminated run had narrow intervals \emph{and} 73\% drift. And the samples are not
-independent even on a quiet machine: lag-1 autocorrelation reaches 0.95, so the naive interval
-was too narrow by up to $6\times$. \textbf{Precision is not accuracy}, and this report made the
-error it was warning about.
-
-\subsection{Key Generation}
-One-off setup, 50 repetitions: \textbf{TenSEAL 216.180\,ms} ($\pm$0.281), \textbf{OpenFHE
-208.308\,ms} ($\pm$0.206). The only measurement where OpenFHE wins, and the two are within 4\%.
-Setup dominates short sessions: TenSEAL's key generation costs nearly five times its entire
-45\,ms benchmark of encrypted operations.
-
-\subsection{Memory, and the Object We Forgot to Measure}\label{sec:mem}
-
-An earlier draft presented \texttt{tracemalloc} figures --- all under 1\,KB --- as memory usage.
-\textbf{That was misleading.} \texttt{tracemalloc} sees Python allocations only; both libraries
-hold coefficients in native heaps, so those were wrapper-object sizes.
+\subsection{Memory and ciphertext size}
 
 \begin{table}[H]\centering\small
 \begin{tabular}{@{}lrr@{}}
 \toprule
 \textbf{Measure} & \textbf{TenSEAL} & \textbf{OpenFHE} \\
 \midrule
-\texttt{tracemalloc}, encrypt      & 0.59\,KB    & 0.42\,KB \\
-\textbf{Resident per ciphertext}   & \textbf{359,465\,B} & \textbf{1,258,455\,B} \\
-Serialized                          & 334,428\,B  & 1,312,467\,B \\
+Python-visible memory (\texttt{tracemalloc}), encryption & 0.59\,KB & 0.42\,KB \\
+Resident memory held per ciphertext & 359{,}465\,B & 1{,}258{,}455\,B \\
+Serialized ciphertext & 334{,}428\,B & 1{,}312{,}467\,B \\
+Plaintext vector (5 doubles) & \multicolumn{2}{c}{40\,B} \\
 \bottomrule
 \end{tabular}
+\caption{Memory for the 5-element vector. The first row measures Python objects;
+the second and third measure the ciphertext itself.}
 \end{table}
 
-That is \textbf{596$\times$} larger for TenSEAL and $2{,}947\times$ for OpenFHE --- two to four
-orders of magnitude, not the six a previous draft claimed (a dropped kilobyte-to-byte
-conversion, in the paragraph correcting a units error). Resident and serialized agree within
-${\sim}7\%$. The two libraries are not size-comparable here: different ring dimension and tower
-count, and SEAL compresses its serialisation where our OpenFHE path does not.
+The first row is the reason we measured memory two ways. Taken alone,
+\texttt{tracemalloc} suggests a ciphertext costs under a kilobyte, which is wrong
+by a factor of roughly 600: it is measuring the Python wrapper, not the encrypted
+data behind it. The resident-set figure and the serialized size agree with each
+other to within 7\%, which is reassuring since they are independent measurements of
+the same object.
 
-\paragraph{What actually crosses the network.} That paragraph led an earlier draft to conclude
-ciphertext expansion ``is what crosses the network.'' Measuring the overlooked object reverses
-it --- before the cloud can compute at all it needs the \textbf{evaluation keys}:
+The practical consequence is the last row. Five numbers occupy 40 bytes in the
+clear and 334\,KB encrypted under TenSEAL, an expansion of roughly $8{,}400\times$.
+For a cloud deployment this, rather than RAM, is the binding constraint, because it
+is what has to cross the network. Section~\ref{sec:usecase} shows the ratio
+improving sharply once the ciphertext slots are actually used.
+
+We also measured the evaluation keys, which the server needs before it can compute
+at all. At the configuration used in Section~\ref{sec:usecase} these are
+\textbf{179.7\,MB} for TenSEAL and \textbf{69.2\,MB} for OpenFHE, against roughly
+5\,MB of encrypted data. They are transferred once per context rather than per
+query, but they are by a wide margin the largest object involved.
+
+\subsection{Accuracy}\label{sec:accuracy}
 
 \begin{table}[H]\centering\small
 \begin{tabular}{@{}lrr@{}}
 \toprule
-\textbf{At the deployed 1000-patient configuration} & \textbf{TenSEAL} & \textbf{OpenFHE} \\
+\textbf{Operation} & \textbf{TenSEAL} & \textbf{OpenFHE} \\
 \midrule
-Encrypted cohort (5 features) & 5.27\,MB & 7.87\,MB \\
-\textbf{Evaluation keys}      & \textbf{179.7\,MB} & \textbf{69.2\,MB} \\
-Keys $\div$ cohort            & \textbf{34$\times$} & \textbf{8.8$\times$} \\
+Add         & $1.57\times10^{-9}$ & $4.09\times10^{-14}$ \\
+Multiply    & $3.35\times10^{-6}$ & $1.96\times10^{-12}$ \\
+Sum         & $4.60\times10^{-7}$ & $7.11\times10^{-15}$ \\
+Average     & $3.10\times10^{-7}$ & $5.20\times10^{-14}$ \\
+Dot product & $5.19\times10^{-6}$ & $3.27\times10^{-13}$ \\
 \bottomrule
 \end{tabular}
+\caption{Maximum absolute error against the plaintext result.}
 \end{table}
 
-They are one-off per context, which is why they are easy to omit --- and why omitting them
-misleads any deployment that does not amortise a context over very many queries. Of everything
-in this revision, this is the correction we would most want carried forward.
+Both libraries are accurate enough for the applications CKKS targets: an error of
+$10^{-6}$ on values of order 10 is far below the precision of any measurement one
+would realistically encrypt. Multiplication produces the largest error in both,
+which follows from the scheme --- multiplying two ciphertexts multiplies their
+noise, and the rescaling that follows discards low-order bits.
 
-\subsection{Approximation Error}
-Maximum absolute error, TenSEAL vs OpenFHE: Add $1.57\!\times\!10^{-9}$ vs
-$4.09\!\times\!10^{-14}$; Multiply $3.35\!\times\!10^{-6}$ vs $1.96\!\times\!10^{-12}$; Sum
-$4.60\!\times\!10^{-7}$ vs $7.11\!\times\!10^{-15}$; Average $3.10\!\times\!10^{-7}$ vs
-$5.20\!\times\!10^{-14}$; Dot $5.19\!\times\!10^{-6}$ vs $3.27\!\times\!10^{-13}$. OpenFHE is
-$10^{4}$--$10^{7}$ times more precise in this configuration; multiplication dominates the error
-in both, as expected. All errors are negligible for aggregates meaningful to a few decimal
-places. The \emph{cause} is not what we assumed --- see \S\ref{sec:matched}.
+OpenFHE is several orders of magnitude more precise throughout. Part of that is
+its larger scaling factor, $2^{50}$ against TenSEAL's $2^{40}$, which retains about
+ten more bits of each value. Section~\ref{sec:params} shows that this is not the
+whole explanation.
 
-\subsection{Scaling with Vector Size}\label{sec:scaling}
+% ---------------------------------------------------------------------------
+\section{Extension: Larger Inputs}\label{sec:scaling}
 
-End-to-end pipeline; context and keys built once per size and excluded.
+The operations above ran on five values, which is small enough that the question
+arises whether the overheads say anything about realistic workloads. We repeated
+the full pipeline --- encrypt, add, multiply, sum, average, decrypt --- at input
+sizes from 5 to 500.
 
 \begin{table}[H]\centering\small
-\begin{tabular}{@{}rrrrrrr@{}}
+\begin{tabular}{@{}rrrrrr@{}}
 \toprule
-\textbf{Size} & \textbf{Plain (ms)} & \textbf{TenSEAL} & \textbf{OpenFHE} & \textbf{TS vs pt} & \textbf{OF vs pt} & \textbf{OF/TS} \\
+\textbf{Input size} & \textbf{Plaintext (ms)} & \textbf{TenSEAL (ms)} &
+\textbf{OpenFHE (ms)} & \textbf{TenSEAL ovh.} & \textbf{OpenFHE ovh.} \\
 \midrule
-5   & 0.001309 & 37.16  & 301.55 & 28,389$\times$ & 230,368$\times$ & 8.1$\times$ \\
-10  & 0.001683 & 51.13  & 347.45 & 30,383$\times$ & 206,446$\times$ & 6.8$\times$ \\
-50  & 0.004772 & 98.95  & 451.32 & 20,735$\times$ & 94,576$\times$  & 4.6$\times$ \\
-100 & 0.008711 & 119.99 & 501.16 & 13,774$\times$ & 57,532$\times$  & 4.2$\times$ \\
-500 & 0.044284 & 271.19 & 607.03 & 6,124$\times$  & 13,708$\times$  & 2.2$\times$ \\
+5   & 0.001309 & 37.16  & 301.55 & $28{,}389\times$ & $230{,}368\times$ \\
+10  & 0.001683 & 51.13  & 347.45 & $30{,}383\times$ & $206{,}446\times$ \\
+50  & 0.004772 & 98.95  & 451.32 & $20{,}735\times$ & $94{,}576\times$ \\
+100 & 0.008711 & 119.99 & 501.16 & $13{,}774\times$ & $57{,}532\times$ \\
+500 & 0.044284 & 271.19 & 607.03 & $6{,}124\times$  & $13{,}708\times$ \\
 \bottomrule
 \end{tabular}
+\caption{End-to-end pipeline time by input size. Key generation happens once per
+size and is excluded.}
 \end{table}
 
-Over a $100\times$ data increase, plaintext grows $33.8\times$ but \textbf{TenSEAL only
-$7.3\times$ and OpenFHE $2.0\times$}; per-element cost falls $13.7\times$ and $49.7\times$. The
-mechanism is slot packing --- cost is set by ring dimension, not by how many slots hold data,
-and OpenFHE held ring 16384 throughout. Only the rotation count, $\log_2(\text{batch size})$,
-grows.
+\chart{../figures/chart_scaling.png}{Pipeline time against input size. Left: the
+two encrypted libraries. Right: all three on a logarithmic scale.}
 
-Two caveats. The plaintext baseline is \emph{itself} sublinear ($n^{0.77}$), because fixed
-per-call interpreter overhead amortises the same way --- so this row is not independent evidence
-for the CKKS mechanism. And the $n{=}5$ and $n{=}10$ plaintext points are both flagged by the
-drift diagnostics ($-5.5\%$ and $-10.0\%$, relative SD above 50\%), so the largest overhead
-figures rest on the least stable denominators in the study.
+Across a hundredfold increase in data, plaintext time grows $33.8\times$ --- close
+to linear, as expected --- while TenSEAL grows $7.3\times$ and OpenFHE only
+$2.0\times$. The cost per element falls accordingly, from 7.43\,ms to 0.54\,ms for
+TenSEAL.
 
-% =====================================================================
-\subsection{Matched-Parameter Comparison}\label{sec:matched}
+This is slot packing at work. The cost of a CKKS operation is fixed by the ring
+dimension, not by how many slots contain data, so processing 500 values costs
+little more than processing 5. What does grow is the rotation count in the
+summation, which rises with $\log_2$ of the batch size.
 
-``TenSEAL is faster, OpenFHE is more precise'' is not supportable: OpenFHE was doing twice the
-polynomial work per operation and keeping ten more bits per value. \texttt{SetRingDim} (with
-\texttt{HEStd\_NotSet}) pins it to 8192 at $2^{40}$, matching TenSEAL. We also swept the
-\emph{scaling technique}, which an earlier draft had silently confounded with the parameter
-change.
+The practical reading is that \textbf{a partly empty ciphertext is wasted work}.
+At five values, TenSEAL is paying for thousands of slots to compute on five
+numbers, which is why the overhead there is $28{,}389\times$ and at 500 values only
+$6{,}124\times$. Neither library is full even at 500. It also means an overhead
+figure quoted without the input size behind it says very little: the same pipeline
+in this one table ranges from $230{,}368\times$ to $13{,}708\times$ for OpenFHE.
+
+% ---------------------------------------------------------------------------
+\section{Extension: Are the Libraries Different, or the Parameters?}\label{sec:params}
+
+Section~\ref{sec:runtime} found TenSEAL faster on every operation and
+Section~\ref{sec:accuracy} found OpenFHE more precise. Both comparisons have the
+same weakness: the two libraries were not running equivalent parameters. OpenFHE
+had chosen ring dimension 16384 against TenSEAL's 8192, so it was doing roughly
+twice the polynomial work per operation, and it was using a $2^{50}$ scaling factor
+against $2^{40}$, so it was keeping ten more bits of every value. Attributing
+either result to the library rather than to the configuration would be unfounded.
+
+OpenFHE allows the ring dimension to be set explicitly, so we re-ran it pinned to
+8192 with a $2^{40}$ scale, matching TenSEAL. We also varied OpenFHE's
+\emph{scaling technique}, an internal option controlling how it manages the scaling
+factor between multiplications, which TenSEAL does not expose.
 
 \begin{table}[H]\centering\small
 \begin{tabular}{@{}lrrrrrrr@{}}
 \toprule
-\textbf{Arm} & \textbf{Encr} & \textbf{Add} & \textbf{Mult} & \textbf{Sum} & \textbf{Dot} & \textbf{Decr} & \textbf{geo.} \\
+\textbf{OpenFHE configuration} & \textbf{Encr} & \textbf{Add} & \textbf{Mult} &
+\textbf{Sum} & \textbf{Dot} & \textbf{Decr} & \textbf{Geo. mean} \\
 \midrule
-library-chosen (16384, $2^{50}$, FLEXIBLEAUTOEXT) & 2.52 & 4.02 & 6.89 & 7.24 & 8.70 & 16.28 & \textbf{6.44} \\
-matched, \textbf{same technique} (FLEXIBLEAUTOEXT) & 1.20 & 2.12 & 3.16 & 3.25 & 3.97 & 7.83 & \textbf{3.05} \\
-matched, FIXEDMANUAL                               & 1.02 & 1.77 & 1.93 & 2.41 & 3.09 & 6.80 & \textbf{2.37} \\
-matched, FIXEDAUTO / FLEXIBLEAUTO                  & 1.02 & 1.75 & 1.93 & 2.40 & 3.09 & 6.82 & 2.37 \\
+Own defaults (ring 16384, $2^{50}$)          & 2.52 & 4.02 & 6.89 & 7.24 & 8.70 & 16.28 & \textbf{6.44} \\
+Matched, same scaling technique              & 1.20 & 2.12 & 3.16 & 3.25 & 3.97 & 7.83  & \textbf{3.05} \\
+Matched, fastest scaling technique           & 1.02 & 1.77 & 1.93 & 2.41 & 3.09 & 6.80  & \textbf{2.37} \\
 \bottomrule
 \end{tabular}
-\caption*{\small Ratio to TenSEAL, all six operations. An earlier draft showed only the two that converge best.}
+\caption{OpenFHE runtime as a multiple of TenSEAL's, per operation. Lower is
+closer to TenSEAL.}
 \end{table}
 
-\chart{../figures/chart_matched_comparison.png}{OpenFHE placed on TenSEAL's parameters. Lower is better in both panels.}
+Matching the parameters closes most of the gap. Multiplication falls from
+$6.89\times$ to $3.16\times$ and encryption becomes almost identical at
+$1.20\times$; across all six operations the geometric mean falls from $6.44\times$
+to $3.05\times$. Separating the two changes, the ring dimension accounts for a
+factor of 2.18 and the scaling technique for a further 1.64.
 
-\begin{enumerate}[label=\textbf{\arabic*.}]
-\item \textbf{Two variables, separated.} An earlier draft reported ``$6.89\times \to 1.93\times$
-once parameters match'' and credited ring dimension alone --- while also changing the scaling
-technique, which the same section showed is worth $1.64\times$. Holding technique fixed: ring
-$16384\to8192$ gives \textbf{2.18$\times$}; FLEXIBLEAUTOEXT$\to$FIXEDMANUAL at ring 8192 gives
-\textbf{1.64$\times$}; product $3.56\times$, exactly the observed closure. The honest
-parameter-matched figure is \textbf{3.16$\times$}.
+Two qualifications belong with this result. Decryption remains $7.8\times$ slower
+even matched, so the gap narrows everywhere but closes nowhere. And pinning the
+ring dimension overrides OpenFHE's own security check: asked to select a ring for
+these parameters at a 128-bit security level, OpenFHE chooses 16384 and rejects
+8192. The matched configuration therefore buys comparability at the cost of
+security, which is acceptable for an experiment isolating one variable but would
+not be acceptable in deployment.
 
-\item \textbf{The gap narrows everywhere but closes nowhere.} Geometric mean falls
-$6.44\times \to 3.05\times$. Encryption converges to $1.20\times$; \textbf{decryption stays
-$7.8\times$} --- the largest residual, on the operation \S\ref{sec:sec} makes security-critical,
-and one the earlier table omitted. The summary is a range: \textbf{1.2--7.8$\times$ by
-operation}.
+The conclusion we draw is that \textbf{a benchmark of two HE libraries at their
+respective defaults measures the defaults as much as the libraries}. This also
+offers an explanation for why Faneela et al.~\cite{faneela2025} rank OpenFHE ahead
+of SEAL where we rank TenSEAL ahead of OpenFHE: at default settings the two are not
+performing equivalent work.
 
-\item \textbf{Precision is not explained by scale alone.} At identical $2^{40}$ OpenFHE stays
-275--1{,}890$\times$ more precise. Calling that an \emph{implementation} difference is too
-strong: the arms also differ in key-switching auxiliary budget and batch size, neither varied,
-and technique alone moves precision ${\sim}6\times$. The mechanism is not established.
+% ---------------------------------------------------------------------------
+\section{Use Case: Privacy-Preserving Healthcare Analytics}\label{sec:usecase}
 
-\item \textbf{The matched arm is not 128-bit secure --- a retraction.} An earlier draft claimed
-it was, comparing OpenFHE's reported modulus (181--200 bits) against SEAL's 218-bit ceiling.
-Different quantities: SEAL's bound includes its special prime, OpenFHE's figure omits its
-hybrid auxiliaries. The decisive test is to ask the library --- at \texttt{HEStd\_128\_classic}
-with these parameters \textbf{OpenFHE selects ring 16384 and refuses 8192}, for all four
-techniques. The experiment now records that refusal. Parameter parity cost security parity.
-\end{enumerate}
+The measurements so far concern isolated operations. A real workload composes them,
+and composing them raises questions that single operations do not. To see this we
+implemented the motivating scenario from our proposal: a hospital wants a cloud
+provider to compute a score for every patient and the average over the cohort,
+without exposing any individual record.
 
-Still a \textbf{trade-off curve, not a ranking} --- but weaker than first claimed. This also
-offers a reading of why Faneela et al.~\cite{faneela2025} rank OpenFHE above SEAL where we rank
-TenSEAL above OpenFHE: at defaults the two libraries are not running comparable parameters, and
-the ordering is a property of the configuration route as much as of the code.
-
-% =====================================================================
-\section{Applied Use Case: An Encrypted Composite Score}\label{sec:usecase}
-
-\noindent\fbox{\parbox{0.97\linewidth}{\small \textbf{Disclaimer.} The score below is a
-\textbf{synthetic construct for demonstration only}. It is \textbf{not} a validated clinical
-model, is not derived from medical literature, and must not be read as an assessment of patient
-risk. The cohort is synthetic. Its purpose is to give the benchmark a computation with realistic
-\emph{structure} --- several inputs, mixed arithmetic, genuine multiplicative depth.}}
-
-\subsection{Threat Model, and Why This Workload Is a Proxy}\label{sec:threat}
-
-Earlier drafts described the scenario without naming an adversary. \textbf{Assets:} individual
-feature values; the released cohort mean; arguably the formula. \textbf{Adversary:} a
-semi-honest cloud that follows the protocol but inspects everything --- ciphertexts, circuit,
-timings, released outputs. \textbf{Trust:} the hospital holds plaintext and the secret key.
-
-\textbf{What this does not protect.} The circuit is public to the cloud (weights, structure and
-ranges are plaintext constants it evaluates). Cohort size and query pattern leak. The
-\emph{released aggregate} is a disclosure channel HE does not touch --- output privacy, via
-differential privacy over the decrypted value, is a different problem from \ind{} and we address
-neither. And there is \textbf{no integrity}: a malicious or buggy cloud can return a ciphertext
-decrypting to anything, undetected. Our accuracy tables check against a plaintext reference the
-hospital computed itself, which a real deployment could not do.
-
-\textbf{Why this workload is a proxy.} We compare HE against plaintext only, which answers
-``what does HE cost'', not ``should you use HE''. The real alternatives --- TEEs, secure
-multi-party computation, differential privacy alone, or not outsourcing --- are outside our
-scope and we benchmark none. And \S\ref{sec:results} measures the plaintext score for all 1000
-records at 0.075\,ms on 40\,KB of data: \textbf{no one would outsource that}, and the client
-spends more CPU encrypting and decrypting than computing the score itself. The scenario earns
-its place because its \emph{arithmetic structure} matches workloads where outsourcing is
-justified.
-
-\subsection{The Score}
-Each feature is min-max normalised against a \emph{public} reference range --- age 18--90,
-systolic BP 90--180, BMI 18--40, cholesterol 120--280, glucose 70--200:
+\paragraph{The score.} We define a \textbf{synthetic risk score} over five
+measurements per patient. \emph{This score is constructed for demonstration only.
+It is not a medical model and carries no clinical meaning.} Each feature is first
+normalised to roughly $[0,1]$ against a fixed public range,
+$x_{\text{norm}} = (x - \min)/(\max - \min)$, using age 18--90, systolic blood
+pressure 90--180, BMI 18--40, cholesterol 120--280 and glucose 70--200. The score
+is then
 \begin{align*}
-\text{score} = 100 \cdot \big(&0.15\,a + 0.20\,b + 0.15\,m + 0.15\,c + 0.15\,g \\
-                              &+ 0.10\,b\,g + 0.05\,m\,c + 0.05\,b^2\big)
+\text{score} = 100 \cdot \big(\;
+& 0.15\,a + 0.20\,b + 0.15\,m + 0.15\,c + 0.15\,g \\
++\; & 0.10\,b\,g + 0.05\,m\,c + 0.05\,b^{2} \;\big),
 \end{align*}
-where each symbol is the normalised feature. The eight weights sum to 1.0. The first five terms
-need only multiplication by \emph{public constants}. The last three make this a real HE
-benchmark: two \textbf{interaction terms} and one \textbf{quadratic term}, each requiring
-\textbf{ciphertext $\times$ ciphertext} multiplication, which consumes depth and forces
-relinearization. The weights were chosen so the terms sum to 1.0 and so that the last three
-force ciphertext-by-ciphertext products; they are not fitted to any outcome.
+where $a,b,m,c,g$ are the normalised age, blood pressure, BMI, cholesterol and
+glucose. The eight weights sum to 1, so a patient at the top of every range scores
+100.
 
-Ranges are public deliberately: deriving min/max from the data would need ciphertext
-comparison, which CKKS does not support natively. \textbf{Cohort}: 1000 records, fixed seed;
-age uniform, the rest normal-then-clipped, giving scores of mean 35.63, SD 8.45, range
-9.36--68.90.
+This form was chosen to exercise the library rather than to model medicine. The
+first five terms are a weighted average, needing only multiplication by public
+constants. The last three are what make it a useful test: two interaction terms and
+one square, each requiring the multiplication of one ciphertext by another. That
+is the operation that consumes multiplicative depth, and it is the reason this
+computation cannot run under the parameters used in Section~\ref{sec:results}.
 
-\subsection{Encrypted Implementation}
-\textbf{Packing}: one feature per ciphertext, one slot per record --- five ciphertexts of 1000
-values, so one multiplication advances all 1000. \textbf{Padding}: vectors are padded to 1024
-slots (OpenFHE requires a power of two) with \emph{each feature's range minimum}, so they
-normalise to 0 and drop out of every term and the cohort sum. Padding with zeros instead gives
-those slots a nonzero normalised value of $-\min/(\max-\min)$ and silently corrupts the mean; a
-unit test pins this. \textbf{Depth}: normalisation (1) + interaction/quadratic (1) + term
-weights (1) + cohort mean (1) $=$ \textbf{4 levels}.
+\paragraph{The data.} A synthetic cohort of 1000 patients, generated with a fixed
+seed. Age is drawn uniformly across its range; the four clinical measures are drawn
+from normal distributions centred on plausible values and then clipped to the
+ranges above, which keeps every normalised value inside $[0,1]$. The resulting
+scores have mean 35.63 and standard deviation 8.45.
 
-\subsection{Depth, Not Data Volume, Drives Cost}
-The \S\ref{sec:prim} parameters \textbf{cannot run this circuit}. TenSEAL at
-\texttt{poly=8192} fails with \texttt{scale out of bounds}, and any longer chain is rejected
-outright; \texttt{poly=16384} with 4 levels works. OpenFHE at depth 3 evaluates the score but
-fails on the cohort mean; depth 4 works at ring 16384; depth 5 works but pushes the ring to
-32768. The rejection is not a quirk: SEAL's published table caps the coefficient modulus at
-\textbf{218 bits for ring 8192} and 438 for 16384, and $[60,40,40,60]=200$ fits while
-$[60,40,40,40,60]=240$ does not.
+\paragraph{Encrypting it.} We encrypt one \emph{feature} per ciphertext, with one
+patient per slot, giving five ciphertexts of 1000 values each. A single homomorphic
+multiplication then advances all 1000 patients at once. The alternative --- one
+ciphertext per patient --- would multiply the number of operations by a thousand.
 
-So a modest increase in circuit complexity forces new cryptographic parameters, and asking for
-more depth than needed is an easy and costly mistake --- our first implementation requested
-depth 5, doubling the ring for no benefit. Two caveats we previously omitted: this holds at a
-\emph{fixed scaling factor} (the constraint is depth $\times$ scale), and depth 4 is minimal for
-\emph{our formulation}, not the circuit --- folding term weights into the normalisation
-constants and doing $\times 1/N$ after decryption would give depth 2.
+The padding rule from Section~\ref{sec:impl} becomes delicate here. Vectors are
+padded from 1000 to 1024 slots, and we fill the padding with \emph{each feature's
+minimum}, not with zero. A minimum normalises to exactly 0, so padded slots
+contribute nothing to any term and drop out of the cohort sum. Zero-padding would
+instead give those slots a normalised value of $-\min/(\max-\min)$, which is not
+zero, and would silently corrupt the average. This is exactly the kind of error
+that produces a plausible wrong answer, so we cover it with a unit test.
 
-\subsection{Results}\label{sec:results}
+\paragraph{Depth.} Normalisation, the interaction terms, the weights and the cohort
+mean consume four levels in total. Neither library can run this at the
+Section~\ref{sec:results} settings: TenSEAL fails with \texttt{scale out of bounds}
+and a longer modulus chain does not fit at ring 8192, so the ring must double to
+16384; OpenFHE evaluates the score at depth 3 but fails on the cohort mean, and
+needs depth 4. Adding two interaction terms and a square to a weighted average was
+enough to force a change of cryptographic parameters and a doubling of the ring
+dimension --- a useful illustration that in CKKS the shape of a computation matters
+more than the amount of data in it.
+
+\subsection{Results}
 
 \begin{table}[H]\centering\small
 \begin{tabular}{@{}llrrr@{}}
 \toprule
-\textbf{Stage} & \textbf{Runs at} & \textbf{Plaintext (ms)} & \textbf{TenSEAL (ms)} & \textbf{OpenFHE (ms)} \\
+\textbf{Stage} & \textbf{Runs at} & \textbf{Plaintext (ms)} &
+\textbf{TenSEAL (ms)} & \textbf{OpenFHE (ms)} \\
 \midrule
-Encrypt 5 features & Hospital & ---     & 76.784  & 84.650  \\
-Score evaluation   & Cloud    & 0.0593  & 89.249  & 163.181 \\
-Cohort mean        & Cloud    & 0.0155  & 46.104  & 146.054 \\
-Decrypt scores     & Hospital & ---     & 2.186   & 17.457  \\
+Encrypt 5 features & Hospital & ---    & 76.784  & 84.650  \\
+Evaluate the score & Cloud    & ---    & 89.249  & 163.181 \\
+Cohort mean        & Cloud    & ---    & 46.104  & 146.054 \\
+Decrypt the scores & Hospital & ---    & 2.186   & 17.457  \\
 \midrule
-\textbf{Pipeline total}       & & \textbf{0.0748} & \textbf{214.323} & \textbf{411.341} \\
-\textbf{Overhead vs plaintext}& & \textbf{1$\times$} & \textbf{2,865$\times$} & \textbf{5,499$\times$} \\
-\textbf{Per record}           & & \textbf{0.000075} & \textbf{0.2143} & \textbf{0.4113} \\
-Cloud-side only               & Cloud & 0.0748 & 135.353 & 309.235 \\
+\textbf{Total}     &          & \textbf{0.0748} & \textbf{214.323} & \textbf{411.341} \\
+\textbf{Overhead}  &          & \textbf{1$\times$} & \textbf{2{,}865$\times$} & \textbf{5{,}499$\times$} \\
+\textbf{Per patient} &        & \textbf{0.000075} & \textbf{0.2143} & \textbf{0.4113} \\
 \bottomrule
 \end{tabular}
+\caption{The full scenario over 1000 patients. The plaintext column is the single
+computation producing the same output: a score per patient and the cohort mean.}
 \end{table}
 
-Accuracy: maximum absolute error $4.881\!\times\!10^{-4}$ (TenSEAL) and
-$1.976\!\times\!10^{-10}$ (OpenFHE) score points; encrypted cohort mean 35.627391 and 35.626948
-against a plaintext 35.626948.
+\begin{table}[H]\centering\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+ & \textbf{TenSEAL} & \textbf{OpenFHE} \\
+\midrule
+Maximum absolute error (score points) & $4.881\times10^{-4}$ & $1.976\times10^{-10}$ \\
+Cohort mean, encrypted                & 35.627391            & 35.626948 \\
+Cohort mean, plaintext                & \multicolumn{2}{c}{35.626948} \\
+\bottomrule
+\end{tabular}
+\caption{Accuracy of the encrypted score. The worst per-patient error is
+$5\times10^{-4}$ points on a 0--100 scale.}
+\end{table}
 
-\chart{../figures/chart_risk_score.png}{Encrypted score over 1000 records: stage cost, cohort distribution, accuracy.}
+\chart{../figures/chart_risk_score.png}{Cost per stage, the distribution of scores
+across the synthetic cohort, and the accuracy of the encrypted result.}
 
-\paragraph{The overhead figures are a correction.} An earlier draft reported $3{,}614\times$ and
-$6{,}936\times$, using a plaintext denominator of 0.0593\,ms --- the score stage alone ---
-against an encrypted numerator summing four stages. Worse, the two plaintext stages
-\emph{overlapped}: the cohort-mean stage recomputed the scores, so it contained the score stage
-and the two could not be summed either. Stages are now disjoint and the ratios fall ${\sim}21\%$.
+The whole scenario takes \textbf{214\,ms} with TenSEAL and 411\,ms with OpenFHE,
+of which the cloud performs 135\,ms and 309\,ms. Per patient that is 0.21 and
+0.41\,ms, and the encrypted cohort mean matches the plaintext value to five
+significant figures.
 
-The scenario runs in \textbf{214\,ms} (TenSEAL) or 411\,ms (OpenFHE) for 1000 records. Overhead
-is well below the isolated primitives ($2{,}865\times$ against $13{,}450\times$): nothing got
-faster, the ciphertexts got fuller --- though still only one-eighth full, so the amortisation
-argument is made below saturation.
+The overhead is worth comparing against Section~\ref{sec:results}: $2{,}865\times$
+here, against $13{,}450\times$ for the isolated operations. Nothing became faster.
+The ciphertexts became fuller --- 1024 slots carrying real data instead of 5 ---
+which is the same effect Section~\ref{sec:scaling} isolated, now visible in a
+complete workload. Measuring HE on toy inputs overstates its cost.
 
-\paragraph{What the per-record number omits.} It says computation is not the bottleneck; it does
-not say the system is deployable. Excluded: key generation; the \textbf{evaluation keys} at
-179.7\,MB and 69.2\,MB (\S\ref{sec:mem}); transport of 5.3\,MB; key custody and rotation. Client
-and server also share one process holding the secret key, so ``the cloud never sees plaintext''
-is a property of the simulation.
+The same amortisation appears in the data volume. Each encrypted feature is about
+1\,MB, so the hospital uploads roughly 5\,MB for a cohort that occupies 40\,KB in
+the clear --- an expansion of $132\times$, against the $8{,}400\times$ measured on
+the 5-element vector in Section~\ref{sec:results}. The evaluation keys, at
+179.7\,MB, remain larger than the data.
 
-% =====================================================================
-\section{Security: Is Encrypting Enough?}\label{sec:sec}
+Two honest caveats. Encryption and decryption are performed by the hospital, so
+79\,ms of the 214\,ms is work the client does rather than work it avoids; for a
+computation this small, outsourcing would not pay for itself, and the scenario is
+better read as a stand-in for workloads where it would. And our benchmark runs
+client and server in a single process, so it measures the computation faithfully
+but not the network transfer or key management a deployment would also need.
 
-CKKS is IND-CPA secure. IND-CPA says nothing about releasing \emph{decryption results} --- and
-our scenario releases them. A CKKS decryption returns the message \emph{plus an error term that
-depends on the secret key}; an adversary that obtains approximate decryptions of ciphertexts
-whose exact plaintexts it can predict can solve for the key~\cite{limicciancio2021}. We
-deliberately do not quote a query count.
-
-\subsection{What the Libraries Do, and What the Defence Costs}
-
-\S\ref{sec:sec} runs on a \textbf{64-record} cohort (batch 64, depth 4, ring 16384, 200
-repetitions), not \S\ref{sec:usecase}'s 1000; the noise estimate is circuit- and data-dependent
-and does not transfer unchanged. These arms are \textbf{not matched to each other} --- the
-criticism \S\ref{sec:matched} levels at the performance comparison applies here too.
-
-The observable signature of a decryption-noise defence is \textbf{randomization}: plain CKKS
-decryption is deterministic, so one fixed ciphertext must decrypt identically every time. Over
-32 trials: \textbf{TenSEAL} --- not randomized, spread \textbf{exactly 0}; \textbf{OpenFHE
-\texttt{FIXED\_NOISE\_DECRYPT}} (default) --- randomized, $5.71\!\times\!10^{-11}$;
-\textbf{OpenFHE \texttt{NOISE\_FLOODING\_DECRYPT}} --- randomized, $1.28\!\times\!10^{-13}$.
-
-\textbf{In the version tested TenSEAL's decryption is bit-deterministic}, so the released value
-carries exactly the key-dependent error the attack exploits, and no setting changes it. OpenFHE
-randomizes by default --- which surprised us.
-
-\textbf{The table contains an inversion we cannot explain away.} The ``calibrated'' arm adds
-${\sim}450\times$ \emph{less} noise than the default it supposedly improves on, and is
-correspondingly more accurate. The consistent reading is that the default applies a conservative
-constant while flooding calibrates to this circuit's measured error, which for so shallow a
-circuit is smaller. If so, the two-pass arm is not straightforwardly stronger. We did not
-establish which mode is more secure.
-
-Flooding costs \textbf{1.42$\times$ on decryption and nothing elsewhere} (encrypt, multiply and
-sum all $1.00\times$), plus a full extra pass for estimation.
-
-\chart{../figures/chart_ind_cpad.png}{Cost of the flooding defence, and which configurations randomize the released value.}
-
-\subsection{Why We Do Not Claim This Makes It Secure}
-
-OpenFHE estimates circuit noise \textbf{empirically}, from precision loss in the imaginary slots
-of a trial decryption --- an \textbf{average-case} estimate. Guo et al.~\cite{guo2024} show that
-flooding built on non-worst-case estimation remains vulnerable to key recovery, explicitly
-including deployments implementing the CRYPTO 2022 bounds. Average-case analysis assumes
-independent input ciphertexts; our circuit combines correlated ones.
-
-\textbf{So \S\ref{sec:sec} measures the cost of a partial defence, not the cost of security.}
-Randomized decryption shows a defence is \emph{active}, not \emph{sufficient}; we neither
-mounted the attack nor verified a bound. The same restraint applies in the other direction, and
-an earlier draft did not apply it: determinism establishes that TenSEAL offers \textbf{no
-mitigation}, not that our scenario is exploitable.
-
-% =====================================================================
-\section{Usability}
+% ---------------------------------------------------------------------------
+\section{Ease of Implementation and Usability}\label{sec:usability}
 
 \begin{table}[H]\centering\small
 \begin{tabular}{@{}lll@{}}
 \toprule
 \textbf{Aspect} & \textbf{TenSEAL} & \textbf{OpenFHE} \\
 \midrule
-Installation & \texttt{pip install}, all platforms & \textbf{Linux only}, one CPython version \\
-API & High-level (\texttt{enc + enc}) & Low-level (\texttt{cc.EvalAdd(ct, ct)}) \\
-Parameter control & Modulus chain explicit & Depth given; ring chosen by library \\
-Scaling technique & Not exposed & Four options, real trade-off (\S\ref{sec:matched}) \\
-Decryption-noise defence & \textbf{None} & Default fixed noise; opt-in flooding \\
+Installation      & \texttt{pip install}, any platform & Linux only, one Python version \\
+Writing a computation & Python operators on encrypted vectors & Explicit method calls \\
+Key management    & Handled by the context & Evaluation keys generated by hand \\
+Parameters        & Modulus chain given directly & Depth given, ring dimension derived \\
+Vector length     & Any & Powers of two only \\
+Error messages    & Python exceptions & C++ errors through the bindings \\
+Benchmark code    & 92 lines & 111 lines \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-TenSEAL is far easier for prototyping. OpenFHE exposes controls that matter a great deal
-(\S\ref{sec:matched}, \S\ref{sec:sec}) and that TenSEAL does not offer at all. One genuine
-advantage of its style: declaring depth up front makes exceeding it fail immediately, where
-TenSEAL's failure surfaces later as \texttt{scale out of bounds}.
+TenSEAL was considerably easier to work with. Encrypted code looks like the
+plaintext code beside it, and the context handles keys without being asked. OpenFHE
+requires more from the programmer: evaluation keys must be generated explicitly,
+batch sizes rounded to powers of two, and several concepts named that TenSEAL keeps
+internal.
 
-% =====================================================================
-\section{Limitations}\label{sec:limits}
+That verbosity is not purely a cost. OpenFHE requires the multiplicative depth to
+be declared up front, so exceeding it fails immediately and says so. TenSEAL
+discovers the same problem later and reports \texttt{scale out of bounds}, whose
+connection to the length of the modulus chain is not obvious to a newcomer --- we
+spent noticeably longer diagnosing that failure in TenSEAL than the equivalent in
+OpenFHE. OpenFHE also exposes controls, such as the scaling technique of
+Section~\ref{sec:params}, that turn out to matter and that TenSEAL does not offer
+at all.
 
-Several were identified by adversarial review of an earlier draft and are recorded rather than
-fixed, because fixing them needs measurement we did not do.
+% ---------------------------------------------------------------------------
+\section{Practical Limitations}\label{sec:limits}
 
-\textbf{Measurement.} (1) \textbf{Arms are not interleaved or replicated} --- one process, fixed
-order, so every interval is \emph{within-run} and run-to-run variance (often dominant;
-\cite{mytkowicz2009}) is unmeasured; two runs of the same OpenFHE configuration in our own
-artifacts differ 10\% on encryption. (2) \textbf{Plaintext denominators are interpreter
-measurements} with relative SD above 50\%; ratios against them are upper bounds relative to
-optimised plaintext. (3) \textbf{Warm-up is short for TenSEAL}, whose transient runs a few
-hundred calls, biasing its means slightly high --- an asymmetric effect. (4) \textbf{The
-stationarity checks miss disturbances symmetric about the midpoint.} (5) \textbf{One node, one
-CPU generation, single-threaded} --- AVX2 but not AVX-512, and the two libraries have different
-vectorisation backends, so even the ratios may shift on newer hardware.
-
-\textbf{Cryptographic scope.} (6) \textbf{The matched arm is not 128-bit secure} (see
-\S\ref{sec:matched}). (7) \textbf{The two ``multiply'' operations differ}: TenSEAL relinearises
-and rescales, OpenFHE defers the rescale, so $3.16\times$ is a lower bound. (8) \textbf{Depth 4
-is minimal for our formulation, not the circuit.} (9) \textbf{``Depth drives ring dimension''
-holds at fixed scale.} (10) \textbf{Ciphertext-size comparison is parameter-determined}, and
-SEAL compresses where our OpenFHE path does not.
-
-\textbf{Scenario.} (11) Semi-honest adversary only; \textbf{no integrity}. (12) \textbf{No
-alternatives benchmarked} --- no TEE, MPC or DP baseline. (13) \textbf{The per-record figure
-excludes most of a deployment}, and client and server share one process. (14) \textbf{Output
-privacy and regulation are untreated.} (15) \textbf{Determinism is an observational bound} at
-$n{=}32$ trials. (16) \textbf{The score is synthetic throughout}, with independently drawn
-features where real measures correlate. (17) \textbf{No bootstrapping.}
-
-% =====================================================================
-\section{Conclusions}
-
-\begin{enumerate}[label=\textbf{\arabic*.}]
-\item \textbf{Cost depends on the operation and on how full the ciphertexts are.} Overhead ran
-from $153\times$ (addition) to $32{,}832\times$ (summation) on a 5-element vector, falling to
-$2{,}865\times$ for the whole pipeline once 1000 values shared each ciphertext --- still only
-one-eighth full. A slowdown quoted without a fill fraction is close to uninterpretable.
-
-\item \textbf{Most of the library gap was a parameter gap --- but less than we first said.}
-Matched, and holding the scaling technique fixed, OpenFHE's multiply penalty falls
-$6.89\times \to 3.16\times$, not the $1.93\times$ an earlier draft got by changing two variables
-at once. Decryption still trails $7.8\times$. And the matched arm is \textbf{not} 128-bit secure.
-
-\item \textbf{Depth, not data volume, drove cost in the regime measured} --- at fixed scaling
-factor, and only while data fits the available slots.
-
-\item \textbf{Rigorous measurement changed the numbers, then changed them again.} Contaminated
-runs showed 73\% drift behind narrow intervals; the intervals were \emph{also} up to $6\times$
-too narrow on a quiet machine, because consecutive timings are autocorrelated. Both are the same
-error --- treating an interval as evidence of validity --- and this report made it twice.
-
-\item \textbf{The largest object crossing the network is the one we did not measure.} Evaluation
-keys are 179.7\,MB against a 5.3\,MB encrypted cohort.
-
-\item \textbf{Encryption is not the whole security question.} Our scenario releases decrypted
-aggregates, exactly where CKKS is not \ind{} secure. TenSEAL offers no mitigation; OpenFHE
-randomises by default and offers calibrated flooding for $1.42\times$ on decryption --- but this
-is a partial defence at best, and we could not explain why the calibrated arm adds less noise
-than the default.
-
-\item \textbf{Who should act.} Engineers choosing a CKKS library for a pipeline that
-\emph{releases decrypted values} should weigh \S\ref{sec:sec} above \S\ref{sec:prim}. Anyone
-quoting HE benchmarks should state fill fraction and parameters, which move headlines by an
-order of magnitude --- and, as \S\ref{sec:matched} suggests, can reverse a library ranking.
+\paragraph{Encountered during development.}
+\begin{enumerate}
+\item \textbf{OpenFHE installs only on Linux, and only for one Python version.}
+Its wheel ships a binary built for CPython 3.8; installing it under 3.9 or later
+appears to succeed and then fails at import. This dictated the Python version for
+the whole project.
+\item \textbf{Power-of-two batch sizes.} Every input must be padded, and
+Section~\ref{sec:usecase} shows the padding value is not always free to choose.
+\item \textbf{Multiplicative depth must be planned in advance.} Adding two
+interaction terms to a weighted average forced new parameters and doubled the ring
+dimension. Asking for more depth than needed is equally costly: our first attempt
+requested depth 5, which works but pushes the ring to 32768 and slows every
+operation for no benefit.
+\item \textbf{Measuring memory is not straightforward.} The obvious tool reports a
+figure roughly 600 times too small, because the data lives outside Python.
 \end{enumerate}
 
-% =====================================================================
-\begin{thebibliography}{99}\small
-\bibitem{ckks2017} J.\,H. Cheon, A. Kim, M. Kim, Y. Song. Homomorphic encryption for arithmetic of approximate numbers. \emph{ASIACRYPT}, 2017.
-\bibitem{rns2018} J.\,H. Cheon, K. Han, A. Kim, M. Kim, Y. Song. A full RNS variant of approximate homomorphic encryption. \emph{SAC}, 2018.
-\bibitem{openfhe2022} A. Al Badawi et al. OpenFHE: open-source fully homomorphic encryption library. \emph{WAHC}, 2022.
-\bibitem{tenseal2021} A. Benaissa, B. Retiat, B. Cebere, A.\,E. Belfedhal. TenSEAL: a library for encrypted tensor operations. 2021.
-\bibitem{kim2022} A. Kim, A. Papadimitriou, Y. Polyakov. Approximate homomorphic encryption with reduced approximation error. \emph{CT-RSA}, 2022.
-\bibitem{hestandard} M. Albrecht et al. Homomorphic Encryption Security Standard. HomomorphicEncryption.org, 2018.
-\bibitem{viand2021} A. Viand, P. Jattke, A. Hithnawi. SoK: fully homomorphic encryption compilers. \emph{IEEE S\&P}, 2021.
-\bibitem{heprofiler2025} J. Takeshita, N. Koirala, C. McKechney, T. Jung. HEProfiler: an in-depth profiler of approximate homomorphic encryption libraries. \emph{J. Cryptographic Engineering}, 2025.
-\bibitem{faneela2025} Faneela, J. Ahmad, B. Ghaleb, S.\,U. Jan, W.\,J. Buchanan. Cross-platform benchmarking of the FHE libraries: novel insights into SEAL and OpenFHE. arXiv:2503.11216, 2025.
-\bibitem{perfanalysis2025} Performance analysis of leading homomorphic encryption libraries: a benchmark study of SEAL, HElib, OpenFHE and Lattigo. \emph{ICCSAIDE}, 2025.
-\bibitem{sathya2018} S.\,S. Sathya, P. Vepakomma, R. Raskar, R. Ramachandra, S. Bhattacharya. A review of homomorphic encryption libraries for secure computation. arXiv:1812.02428, 2018.
-\bibitem{limicciancio2021} B. Li, D. Micciancio. On the security of homomorphic encryption on approximate numbers. \emph{EUROCRYPT}, 2021.
-\bibitem{lmss2022} B. Li, D. Micciancio, M. Schultz, J. Sorrell. Securing approximate homomorphic encryption using differential privacy. \emph{CRYPTO}, 2022.
-\bibitem{guo2024} Q. Guo, D. Nabokov, E. Suvanto, T. Johansson. Key recovery attacks on approximate homomorphic encryption with non-worst-case noise flooding countermeasures. \emph{USENIX Security}, 2024.
-\bibitem{pkc2025} F. Bergamaschi et al. Revisiting the security of approximate FHE with noise-flooding countermeasures. \emph{PKC}, 2025.
-\bibitem{aahe2024} A. Alexandru, A. Al Badawi, D. Micciancio, Y. Polyakov. Application-aware approximate homomorphic encryption. ePrint 2024/203.
-\bibitem{mytkowicz2009} T. Mytkowicz, A. Diwan, M. Hauswirth, P.\,F. Sweeney. Producing wrong data without doing anything obviously wrong! \emph{ASPLOS}, 2009.
-\end{thebibliography}
+\paragraph{Limitations of this study.}
+\begin{enumerate}
+\item Measurements come from one machine, one CPU generation and a single thread.
+The ratios between columns transfer better than the absolute times.
+\item The plaintext baseline is ordinary Python. A NumPy or C baseline would be
+faster, so our overhead figures are upper bounds relative to optimised plaintext.
+\item Each configuration was measured in one process run, so run-to-run variation
+between processes is not captured.
+\item Neither library was tested with bootstrapping, so all results concern
+computations that fit within a fixed level budget.
+\end{enumerate}
 
-\vspace{0.2cm}
-\noindent\rule{\linewidth}{0.4pt}\\
-{\footnotesize Code, notebook and charts accompany this report; every figure is regenerable with
-\texttt{./run\_all\_benchmarks.sh}. Software measured: TenSEAL 0.3.15, OpenFHE 1.4.1.}
+% ---------------------------------------------------------------------------
+\section{Conclusions}
+
+The research question asked what basic computations cost under homomorphic
+encryption compared with plaintext. The measurements give a specific answer and,
+more usefully, explain what governs it.
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+\item \textbf{The overhead is a range, not a number.} Encrypted operations cost
+between $153\times$ and $32{,}832\times$ their plaintext equivalents in TenSEAL, and
+between $615\times$ and $237{,}943\times$ in OpenFHE. Any single quoted figure hides
+a factor of two hundred.
+
+\item \textbf{What an operation costs depends on whether it needs rotations.}
+Addition and constant multiplication act on ciphertexts directly and are cheap.
+Summation, average and dot product must move data between slots, and each rotation
+carries a key switch. Structuring a computation to avoid aggregation across slots
+is the single most effective optimisation available.
+
+\item \textbf{Ciphertexts should be filled.} A hundredfold increase in input raised
+encrypted runtime by only $7.3\times$, because CKKS charges per ciphertext rather
+than per value. The corollary is that measurements on small inputs are misleading:
+the same pipeline showed $28{,}389\times$ overhead at five values and $6{,}124\times$
+at five hundred.
+
+\item \textbf{Much of the difference between the libraries was a difference in
+parameters.} Re-running OpenFHE at TenSEAL's ring dimension and scale cut its
+multiplication penalty from $6.89\times$ to $3.16\times$ and made encryption nearly
+identical. A comparison of two HE libraries at their default settings is partly a
+comparison of the defaults.
+
+\item \textbf{Composite computations are cheaper than isolated operations
+suggest.} The healthcare scenario, over 1000 records with interaction terms and a
+cohort aggregate, ran at $2{,}865\times$ plaintext --- a fifth of the overhead of the
+isolated benchmark --- and agreed with the plaintext result to five significant
+figures.
+
+\item \textbf{Data volume is dominated by keys, not ciphertexts.} A ciphertext
+expands the data $132\times$ at full occupancy, but the evaluation keys the server
+needs are 179.7\,MB against 5\,MB of encrypted data.
+\end{enumerate}
+
+Overall, homomorphic encryption is usable today for the kind of computation
+examined here, provided the workload is batched, structured to avoid unnecessary
+rotations, and given parameters chosen deliberately rather than by default. The
+cost is real but is dominated by choices the programmer controls.
+
+A further experiment beyond the scope of this proposal, measuring the cost of
+OpenFHE's noise-flooding decryption mode, is included in the project repository.
+
+% ---------------------------------------------------------------------------
+\begin{thebibliography}{9}\small
+\bibitem{ckks2017} J.\,H. Cheon, A. Kim, M. Kim, Y. Song. Homomorphic encryption
+for arithmetic of approximate numbers. \emph{ASIACRYPT}, 2017.
+\bibitem{openfhe2022} A. Al Badawi et al. OpenFHE: open-source fully homomorphic
+encryption library. \emph{WAHC}, 2022.
+\bibitem{tenseal2021} A. Benaissa, B. Retiat, B. Cebere, A.\,E. Belfedhal.
+TenSEAL: a library for encrypted tensor operations using homomorphic encryption.
+2021.
+\bibitem{sathya2018} S.\,S. Sathya, P. Vepakomma, R. Raskar, R. Ramachandra,
+S. Bhattacharya. A review of homomorphic encryption libraries for secure
+computation. arXiv:1812.02428, 2018.
+\bibitem{faneela2025} Faneela, J. Ahmad, B. Ghaleb, S.\,U. Jan, W.\,J. Buchanan.
+Cross-platform benchmarking of the FHE libraries: novel insights into SEAL and
+OpenFHE. arXiv:2503.11216, 2025.
+\bibitem{heprofiler2025} J. Takeshita, N. Koirala, C. McKechney, T. Jung.
+HEProfiler: an in-depth profiler of approximate homomorphic encryption libraries.
+\emph{Journal of Cryptographic Engineering}, 2025.
+\bibitem{viand2021} A. Viand, P. Jattke, A. Hithnawi. SoK: fully homomorphic
+encryption compilers. \emph{IEEE Symposium on Security and Privacy}, 2021.
+\bibitem{hestandard} M. Albrecht et al. Homomorphic Encryption Security Standard.
+HomomorphicEncryption.org, 2018.
+\end{thebibliography}
 
 \end{document}

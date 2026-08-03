@@ -1,9 +1,6 @@
 """
 TenSEAL Benchmark — CKKS scheme
-Implements all mandatory operations from the project proposal.
-
-Every operation is timed over many repetitions after a discarded warm-up phase,
-and the reported figure is the mean; see `benchmark_harness` for the rationale.
+Times encrypt/add/mul/sum/avg/dot/decrypt and checks accuracy.
 
 Install: pip install tenseal
 Usage:   python tenseal_benchmark.py [--repeats 1000] [--warmup 50]
@@ -28,9 +25,7 @@ OP_NAMES = [
     ("Decrypt", "decrypt"),
 ]
 
-# Loose upper bounds on the decryption error, ~3 orders of magnitude above what
-# these parameters actually produce. Exceeding one of these means the circuit
-# broke, not that CKKS was noisy — see harness.assert_accuracy.
+# Sanity bounds, ~3 orders of magnitude above the error these parameters produce.
 ACCURACY_LIMITS = {
     "add_max_error": 1e-4,
     "mul_max_error": 1e-2,
@@ -60,8 +55,8 @@ def run_benchmark(vector, repeats=harness.DEFAULT_REPEATS, warmup=harness.DEFAUL
     enc = ts.ckks_vector(ctx, vector)
     enc2 = ts.ckks_vector(ctx, vector2)
 
-    # Each operation starts from the same freshly encrypted operands, so no
-    # repetition inherits noise or a consumed level from the previous one.
+    # Each lambda rebuilds its result from enc/enc2, so repetitions do not
+    # accumulate noise or consume levels.
     operations = {
         "encrypt": lambda: ts.ckks_vector(ctx, vector),
         "add": lambda: enc + enc,
@@ -77,7 +72,7 @@ def run_benchmark(vector, repeats=harness.DEFAULT_REPEATS, warmup=harness.DEFAUL
         memory_repeats=memory_repeats, label="TenSEAL", verbose=verbose,
     )
 
-    # Correctness checks (approximate, CKKS is not exact)
+    # Correctness checks (approximate: CKKS is not exact)
     dec_add = (enc + enc).decrypt()
     dec_mul = (enc * enc).decrypt()
     dec_sum = enc.sum().decrypt()[0]
@@ -96,12 +91,10 @@ def run_benchmark(vector, repeats=harness.DEFAULT_REPEATS, warmup=harness.DEFAUL
     results["avg_error"] = abs(dec_avg - expected_avg)
     results["dot_error"] = abs(dec_dot - expected_dot)
 
-    # Ciphertext size in bytes (serialized)
     results["ciphertext_bytes"] = len(enc.serialize())
 
-    # Resident memory actually held by one ciphertext. tracemalloc cannot see
-    # this — SEAL keeps the coefficients in a native heap — so this is the figure
-    # that answers "how much RAM does a ciphertext cost?".
+    # RSS, not tracemalloc: SEAL allocates ciphertext coefficients on the
+    # native heap, which tracemalloc does not track.
     results["ciphertext_rss_bytes"] = harness.measure_retained_bytes(
         lambda: ts.ckks_vector(ctx, vector))
 

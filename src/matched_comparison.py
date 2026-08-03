@@ -1,48 +1,9 @@
 """
-Like-for-like comparison: OpenFHE forced onto TenSEAL's parameters.
+Like-for-like comparison: OpenFHE pinned to TenSEAL's parameters (ring 8192,
+scale 2^40, first modulus 60 bits), swept over OpenFHE's scaling techniques.
 
-Why this experiment exists
---------------------------
-The main benchmark compares TenSEAL at ring dimension 8192 with a $2^{40}$
-scaling factor against OpenFHE at ring dimension 16384 with a $2^{50}$ scaling
-factor, because those are what each library produces from its natural
-configuration route: TenSEAL is given a modulus chain directly, while OpenFHE is
-given a depth and a scaling size and picks a ring dimension to satisfy them at a
-128-bit security level.
-
-That makes the headline comparison ambiguous. OpenFHE was slower *and* more
-precise, but it was also doing twice the polynomial work per operation and
-keeping ten more bits of each value. Attributing either observation to the
-library rather than to the parameters is unsound.
-
-`SetRingDim` plus `SetSecurityLevel(HEStd_NotSet)` lets OpenFHE be pinned to
-8192 with a 40-bit scaling factor and a 60-bit first modulus — the same as
-TenSEAL's `[60, 40, 40, 60]`. Whatever difference survives that is a property of
-the implementations.
-
-Security of the matched arm — a correction
------------------------------------------
-An earlier version of this file argued that the pinned arm was still 128-bit
-secure, because the modulus OpenFHE reports at ring 8192 is 181-200 bits and
-SEAL's published ceiling at that ring dimension is 218. **That argument was
-wrong**, and this experiment now measures rather than asserts.
-
-Two things were missed. First, SEAL's ceiling bounds the *entire* coefficient
-modulus including the special key-switching prime, whereas OpenFHE's reported
-modulus does not include the auxiliary primes its HYBRID key switching carries —
-so the two numbers being compared were not the same quantity. Second, and
-decisively: given exactly this configuration and asked to choose a ring dimension
-at `HEStd_128_classic`, **OpenFHE selects 16384, not 8192**. The library refuses
-the very parameter set we pin it to. `probe_library_chosen_ring` below records
-that refusal in the results file.
-
-The matched arm is therefore run *below* 128-bit security, and the comparison
-trades security for parameter parity. That is still the right experiment — it is
-the only way to hold ring dimension and scale fixed across two libraries — but it
-must be reported as what it is, and the report now says so.
-
-The sweep also varies OpenFHE's *scaling technique*, which turns out to matter
-more for precision than the scaling factor does.
+Pinning the ring dimension puts the matched arm below 128-bit security:
+`probe_library_chosen_ring` records what OpenFHE would pick on its own.
 
 Usage: python matched_comparison.py [--repeats 200]
 """
@@ -70,8 +31,7 @@ SCALE_BITS = 40
 FIRST_MOD_BITS = 60
 MULT_DEPTH = 3
 
-# A full pipeline of primitives per repetition, so fewer repetitions than the
-# main benchmark; the point here is the ratio between arms, not absolute timing.
+# Each repetition runs a full pipeline, so fewer repetitions than the main benchmark.
 DEFAULT_REPEATS = 200
 DEFAULT_WARMUP = 20
 
@@ -131,7 +91,7 @@ def openfhe_arm(vector, repeats, warmup, scaling_technique=None,
     params.SetBatchSize(8)
 
     if ring_dim is None:
-        # Let OpenFHE choose, at a 128-bit security level: the default arm.
+        # Let OpenFHE pick the ring dimension at 128-bit security.
         params.SetSecurityLevel(fhe.HEStd_128_classic)
     else:
         # Pinning the ring dimension disables the library's own security check.
@@ -171,8 +131,7 @@ def openfhe_arm(vector, repeats, warmup, scaling_technique=None,
     results["mul_max_error"] = max(
         abs(a - v * v) for a, v in zip(out.GetRealPackedValue(), vector))
     results["ring_dimension"] = cc.GetRingDimension()
-    # Measured, not asserted: the previous version of this experiment claimed a
-    # modulus size in prose with no code behind it.
+    # Excludes the auxiliary primes used by HYBRID key switching.
     results["modulus_bits"] = int(cc.GetModulus()).bit_length()
     results["scale_bits"] = scale_bits
     results["scaling_technique"] = scaling_technique or "FLEXIBLEAUTOEXT (default)"
@@ -183,12 +142,10 @@ def openfhe_arm(vector, repeats, warmup, scaling_technique=None,
 
 
 def probe_library_chosen_ring(scale_bits=SCALE_BITS, first_mod_bits=FIRST_MOD_BITS):
-    """What ring dimension does OpenFHE itself pick for the matched parameters?
+    """Ring dimension OpenFHE picks at HEStd_128_classic, per scaling technique.
 
-    This is the evidence behind the retraction in the module docstring. If the
-    library, asked for `HEStd_128_classic` at this depth and scale, chooses a
-    ring dimension larger than the one we pin, then the pinned arm is running
-    below the security level it was claimed to meet.
+    A chosen ring larger than POLY_MODULUS_DEGREE means the pinned arm is below
+    128-bit security.
     """
     findings = {}
     for technique in SCALING_TECHNIQUES:

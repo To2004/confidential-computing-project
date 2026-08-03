@@ -1,11 +1,7 @@
 """
-Scaling benchmark — end-to-end HE pipeline time at different vector sizes.
-Tests sizes: 5, 10, 50, 100, 500
-Saves results to scaling_results.json for plotting.
-
-Each size is timed over many repetitions after a discarded warm-up phase, so the
-scaling curve is drawn through means rather than through single samples. Context
-and key generation happen once per size and are excluded from the timed pipeline.
+Scaling benchmark: end-to-end HE pipeline time at vector sizes 5, 10, 50, 100, 500.
+Context and key generation run once per size and are not timed.
+Saves results to scaling_results.json.
 
 Usage: python benchmark_scaling.py [--repeats 1000] [--warmup 20]
 """
@@ -29,8 +25,7 @@ except (ImportError, ModuleNotFoundError):
 
 SIZES = [5, 10, 50, 100, 500]
 
-# A full pipeline call is far more expensive than a single operation, so the
-# warm-up is shorter than the primitive benchmark's.
+# Shorter warm-up than the primitive benchmark: a full pipeline call is much slower.
 DEFAULT_SCALING_WARMUP = 20
 
 
@@ -44,7 +39,7 @@ def _next_power_of_two(n: int) -> int:
 # ── TenSEAL ──────────────────────────────────────────────────────────────────
 
 def tenseal_pipeline(vector):
-    """Build the context once, return a callable that runs the timed pipeline."""
+    """Build the context once, return the callable that is timed."""
     ctx = ts.context(
         ts.SCHEME_TYPE.CKKS,
         poly_modulus_degree=8192,

@@ -10,7 +10,7 @@ a single average.
 
 > ## 📄 **[Read the report → `final_report.pdf`](final_report.pdf)**
 >
-> 9 pages. LaTeX source: [`report/final_report.tex`](report/final_report.tex).
+> 11 pages. LaTeX source: [`report/final_report.tex`](report/final_report.tex).
 
 ## What is measured
 
@@ -20,7 +20,7 @@ a single average.
 | Scaling with vector size (5 → 500 elements) | `src/benchmark_scaling.py` | `results/scaling_results.json` |
 | Encrypted synthetic medical risk score over 1000 patients | `src/risk_score_benchmark.py` | `results/risk_score_results.json` |
 | OpenFHE forced onto TenSEAL's parameters (like-for-like) | `src/matched_comparison.py` | `results/matched_comparison_results.json` |
-| IND-CPA^D: is decryption randomized, and what does flooding cost | `src/ind_cpad_flooding.py` | `results/ind_cpad_results.json` |
+| IND-CPA^D noise flooding — *beyond the proposal's scope, kept as an extra* | `src/ind_cpad_flooding.py` | `results/ind_cpad_results.json` |
 | All charts | `src/plot_results.py` | `figures/chart_*.png` |
 
 Every timed figure is a **mean over 1000 repetitions**, taken after a warm-up phase
@@ -222,7 +222,7 @@ Start here:
 
 | I want to… | Go to |
 |---|---|
-| Read the findings | **[`final_report.pdf`](final_report.pdf)** (9 pages) |
+| Read the findings | **[`final_report.pdf`](final_report.pdf)** |
 | Understand the measurement method | [`src/benchmark_harness.py`](src/benchmark_harness.py) |
 | See the risk score definition | [`src/synthetic_patients.py`](src/synthetic_patients.py) |
 | Reproduce the numbers | `./run_all_benchmarks.sh` |

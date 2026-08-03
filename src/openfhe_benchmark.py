@@ -1,9 +1,5 @@
 """
-OpenFHE Benchmark — CKKS scheme
-Implements all mandatory operations from the project proposal.
-
-Every operation is timed over many repetitions after a discarded warm-up phase,
-and the reported figure is the mean; see `benchmark_harness` for the rationale.
+OpenFHE CKKS benchmark: times encrypt/add/mul/sum/avg/dot/decrypt and checks accuracy.
 
 Install: pip install openfhe
 Usage:   python openfhe_benchmark.py [--repeats 1000] [--warmup 50]
@@ -38,8 +34,7 @@ OP_NAMES = [
     ("Decrypt", "decrypt"),
 ]
 
-# See the equivalent table in tenseal_benchmark: loose bounds that catch a broken
-# circuit rather than ordinary CKKS noise.
+# Loose bounds: they catch a broken circuit, not ordinary CKKS noise.
 ACCURACY_LIMITS = {
     "add_max_error": 1e-6,
     "mul_max_error": 1e-6,
@@ -61,9 +56,7 @@ def make_context(batch_size: int):
     params.SetMultiplicativeDepth(3)
     params.SetScalingModSize(50)
     params.SetBatchSize(_next_power_of_two(batch_size))
-    # Stated explicitly rather than left to the default, so the report can name
-    # the security level it is measuring at. OpenFHE derives the ring dimension
-    # from this together with the depth and scaling size.
+    # Ring dimension is derived from this plus the depth and scaling size.
     params.SetSecurityLevel(HEStd_128_classic)
 
     cc = GenCryptoContext(params)
@@ -89,8 +82,8 @@ def run_benchmark(vector, repeats=harness.DEFAULT_REPEATS, warmup=harness.DEFAUL
     ct = cc.Encrypt(keys.publicKey, pt)
     ct2 = cc.Encrypt(keys.publicKey, cc.MakeCKKSPackedPlaintext(vector2))
 
-    # Each operation starts from the same freshly encrypted operands, so no
-    # repetition inherits noise or a consumed level from the previous one.
+    # Every op reuses the same fresh ciphertexts, so no repetition inherits noise
+    # or a consumed level from the previous one.
     operations = {
         "encrypt": lambda: cc.Encrypt(keys.publicKey, cc.MakeCKKSPackedPlaintext(vector)),
         "add": lambda: cc.EvalAdd(ct, ct),
@@ -133,15 +126,13 @@ def run_benchmark(vector, repeats=harness.DEFAULT_REPEATS, warmup=harness.DEFAUL
     results["ring_dimension"] = cc.GetRingDimension()
     results["security_level"] = "HEStd_128_classic"
 
-    # Serialized ciphertext size. OpenFHE serializes through a file rather than
-    # returning bytes, which is why the earlier version of this benchmark had no
-    # figure here at all and the report could only quote TenSEAL's.
+    # OpenFHE only serializes to a file, so measure the size on disk.
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "ciphertext.bin")
         if SerializeToFile(path, ct, BINARY):
             results["ciphertext_bytes"] = os.path.getsize(path)
 
-    # Resident memory actually held by one ciphertext, which tracemalloc cannot see.
+    # Ciphertexts live in C++ memory, so tracemalloc misses them; use RSS instead.
     results["ciphertext_rss_bytes"] = harness.measure_retained_bytes(
         lambda: cc.Encrypt(keys.publicKey, cc.MakeCKKSPackedPlaintext(vector)))
 

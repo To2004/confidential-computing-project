@@ -1,18 +1,14 @@
 """
-Tests for the measurement harness statistics.
-
-The statistics in `benchmark_harness` decide what the report claims, so they are
-checked against values worked out by hand rather than trusted. Run with:
-
-    python -m unittest discover -p 'test_*.py'
+Tests for the statistics in `benchmark_harness`, checked against hand-computed
+values. Run with: python -m unittest discover -p 'test_*.py'
 """
 
 import os
 import sys
 import unittest
 
-# The modules under test live in src/; make them importable however the tests
-# are invoked (unittest discover from the repo root, or pytest, or directly).
+# Modules under test live in src/; add it to the path so the tests run under
+# unittest discover, pytest, or directly.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "src"))
 
 
@@ -20,14 +16,14 @@ import benchmark_harness as harness
 
 
 def stats_for_ms(values_ms, **kwargs):
-    """Summarize a list expressed in milliseconds (the harness takes seconds)."""
+    """Summarize values given in milliseconds (the harness takes seconds)."""
     return harness.summarize([v / 1000.0 for v in values_ms], **kwargs)
 
 
 class TestSummarize(unittest.TestCase):
 
     def test_known_values(self):
-        # 1..9 ms: mean 5, median 5, population-corrected sd of 1..9 is 2.7386.
+        # 1..9 ms: mean 5, median 5, sample sd 2.7386.
         st = stats_for_ms(list(range(1, 10)), bootstrap=False)
         self.assertAlmostEqual(st["mean_ms"], 5.0, places=9)
         self.assertAlmostEqual(st["median_ms"], 5.0, places=9)
@@ -52,30 +48,27 @@ class TestSummarize(unittest.TestCase):
         with_outlier = clean[:-1] + [1000.0]
 
         st = stats_for_ms(with_outlier, bootstrap=False)
-        # One sample in a hundred at 100x drags the mean up by ~10%.
+        # One sample of 100 at 100x moves the mean from 10 to 19.9.
         self.assertAlmostEqual(st["mean_ms"], 19.9, places=6)
-        # The median and the trimmed mean do not move at all.
         self.assertAlmostEqual(st["median_ms"], 10.0, places=9)
         self.assertAlmostEqual(st["trimmed_mean_ms"], 10.0, places=9)
         self.assertAlmostEqual(st["mad_ms"], 0.0, places=9)
-        # And the skew is reported rather than hidden.
         self.assertGreater(st["mean_over_median_pct"], 90.0)
 
     def test_percentiles_interpolate(self):
         st = stats_for_ms([float(v) for v in range(1, 101)], bootstrap=False)
-        # For 1..100 the p95 by linear interpolation on ranks is 95.05.
+        # 1..100 with linear interpolation on ranks: p95 = 95.05, p99 = 99.01.
         self.assertAlmostEqual(st["p95_ms"], 95.05, places=6)
         self.assertAlmostEqual(st["p99_ms"], 99.01, places=6)
-        # IQR of 1..100 is 75.25 - 25.75 = 49.5
+        # IQR = 75.25 - 25.75 = 49.5
         self.assertAlmostEqual(st["iqr_ms"], 49.5, places=6)
 
     def test_outlier_fraction_counts_only_the_upper_tail(self):
-        # A tight body plus five very large samples.
         values = [10.0] * 95 + [500.0] * 5
         st = stats_for_ms(values, bootstrap=False)
         self.assertAlmostEqual(st["outlier_fraction_pct"], 5.0, places=6)
 
-        # A symmetric spread with no extreme tail flags nothing.
+        # Symmetric spread, no extreme upper tail.
         symmetric = [float(v) for v in range(1, 101)]
         self.assertEqual(stats_for_ms(symmetric, bootstrap=False)["outlier_fraction_pct"], 0.0)
 
@@ -84,13 +77,9 @@ class TestSummarize(unittest.TestCase):
         many = stats_for_ms([9.0, 10.0, 11.0] * 500, bootstrap=False)   # n = 1500
         self.assertLess(many["ci95_half_width_ms"], few["ci95_half_width_ms"])
 
-        # Same underlying spread, 100x the samples, so the interval narrows by
-        # roughly sqrt(100) = 10. It is slightly more than 10 because the sample
-        # standard deviation carries Bessel's correction: dividing by n-1 inflates
-        # the estimate more at n=15 than at n=1500, so the numerator shrinks too.
-        # The exact expected value is
-        #     (sd_15 / sqrt(15)) / (sd_1500 / sqrt(1500))
-        # with sd_n = sqrt(2 * (n/3) / (n-1)), which comes to 10.3475.
+        # Ratio is (sd_15 / sqrt(15)) / (sd_1500 / sqrt(1500)) with
+        # sd_n = sqrt(2 * (n/3) / (n-1)). Slightly above sqrt(100) because
+        # Bessel's correction inflates sd more at n=15.
         ratio = few["ci95_half_width_ms"] / many["ci95_half_width_ms"]
         expected = ((2 * (15 / 3) / 14) ** 0.5 / 15 ** 0.5) / \
                    ((2 * (1500 / 3) / 1499) ** 0.5 / 1500 ** 0.5)
@@ -121,15 +110,15 @@ class TestDriftDetection(unittest.TestCase):
         self.assertFalse(d["drift_flagged"])
 
     def test_a_slowdown_midway_is_flagged(self):
-        # Second half 50% slower: exactly the shape of competing machine load.
+        # Second half 50% slower.
         samples = [0.010] * 50 + [0.015] * 50
         d = harness._drift_diagnostics(samples)
         self.assertAlmostEqual(d["drift_pct"], 50.0, places=6)
         self.assertTrue(d["drift_flagged"])
 
     def test_drift_survives_sorting_because_order_is_preserved(self):
-        # summarize() sorts internally; drift must be computed on the raw order,
-        # so a sorted-in-place bug would show up as zero drift here.
+        # summarize() sorts internally; drift must use the raw sample order, so
+        # an in-place sort bug shows up here as zero drift.
         samples = [0.010] * 50 + [0.020] * 50
         d = harness._drift_diagnostics(samples)
         self.assertGreater(d["drift_pct"], 90.0)
@@ -140,25 +129,17 @@ class TestDriftDetection(unittest.TestCase):
         self.assertFalse(d["drift_flagged"])
 
     def test_monotonic_ramp_is_caught_by_the_trend_test(self):
-        """The blind spot that motivated adding Mann-Kendall.
-
-        A ramp halves its own apparent size under a first-half/second-half
-        comparison, so a real end-to-end drift of ~10% shows up as ~5% and slips
-        under the threshold. The rank test sees it plainly.
-        """
+        """A linear ramp shows up as half its size in the halves comparison, so
+        the Mann-Kendall trend test is what catches it."""
         ramp = [0.010 * (1 + 0.0001 * i) for i in range(1000)]  # +10% end to end
         d = harness._drift_diagnostics(ramp)
-        self.assertLess(abs(d["drift_pct"]), 6.0)      # halves barely notices
-        self.assertGreater(abs(d["trend_z"]), 1.96)    # trend test does
+        self.assertLess(abs(d["drift_pct"]), 6.0)
+        self.assertGreater(abs(d["trend_z"]), 1.96)
         self.assertTrue(d["drift_flagged"])
 
     def test_v_shape_cancels_in_the_halves_comparison(self):
-        """Documents a residual blind spot rather than claiming it is fixed.
-
-        A disturbance symmetric about the midpoint cancels exactly in the halves
-        statistic, and being non-monotonic it does not move the trend test
-        either. Neither check catches it; a change-point scan would.
-        """
+        """Known blind spot: a disturbance symmetric about the midpoint cancels
+        in the halves statistic and is non-monotonic, so neither check fires."""
         n = 1000
         v = [0.010 * (1 + 0.5 * abs(i - n / 2) / (n / 2)) for i in range(n)]
         d = harness._drift_diagnostics(v)
@@ -168,14 +149,13 @@ class TestDriftDetection(unittest.TestCase):
     def test_autocorrelation_is_detected(self):
         import random
 
-        # Genuinely independent draws: ACF near zero. (Note an *alternating*
-        # series would not do here — it is strongly NEGATIVELY autocorrelated,
-        # |ACF| ~ 1, which is dependence of a different sign, not independence.)
+        # Independent draws give ACF near zero. An alternating series would not
+        # work as the independent case: it is strongly negatively autocorrelated.
         rng = random.Random(11)
         independent = [rng.gauss(0.010, 2e-4) for _ in range(1000)]
         self.assertLess(abs(harness._lag1_autocorrelation(independent)), 0.15)
 
-        # A strongly dependent series: each sample close to the previous one.
+        # Dependent series: each sample close to the previous one.
         dependent, value = [], 0.010
         for i in range(1000):
             value += 1e-6 if i % 200 < 100 else -1e-6
@@ -186,12 +166,8 @@ class TestDriftDetection(unittest.TestCase):
 class TestDependenceAwareInterval(unittest.TestCase):
 
     def test_batch_means_interval_exceeds_iid_under_dependence(self):
-        """The correction this project's own data made necessary.
-
-        Timings taken back-to-back are autocorrelated, so s/sqrt(n) understates
-        the interval. On the project's real samples the understatement reached
-        6x; here a synthetic dependent series must show the same direction.
-        """
+        """Back-to-back timings are autocorrelated, so the iid s/sqrt(n)
+        interval is too narrow; batch means should be wider."""
         import random
 
         rng = random.Random(20260730)
@@ -212,7 +188,7 @@ class TestDependenceAwareInterval(unittest.TestCase):
         series = [rng.gauss(0.010, 2e-4) for _ in range(1000)]
         iid = harness.summarize(series)["ci95_iid_half_width_ms"]
         batched = harness._batch_means_half_width_ms(series)
-        # No dependence to correct for, so the two should agree to within ~2x.
+        # No dependence to correct for, so the two agree to within ~2x.
         self.assertLess(batched / iid, 2.0)
 
     def test_time_operation_reports_which_method_it_used(self):
@@ -232,8 +208,8 @@ class TestTimeOperation(unittest.TestCase):
     def test_warmup_calls_are_excluded_from_the_samples(self):
         calls = []
         stats = harness.time_operation(lambda: calls.append(1), repeats=10, warmup=7)
-        self.assertEqual(len(calls), 17)          # warm-up really ran
-        self.assertEqual(stats["repeats"], 10)    # but is not in the statistics
+        self.assertEqual(len(calls), 17)          # 7 warm-up + 10 measured
+        self.assertEqual(stats["repeats"], 10)
         self.assertEqual(len(stats["samples_ms"]), 10)
         self.assertEqual(stats["warmup"], 7)
 
@@ -269,11 +245,11 @@ class TestMemoryMeasurement(unittest.TestCase):
 
     def test_tracemalloc_sees_a_python_allocation(self):
         kb = harness.measure_peak_memory_kb(lambda: [0] * 100_000, repeats=2)
-        # A list of 100k ints is ~800 KB of pointers; assert the order of magnitude.
+        # A list of 100k ints is ~800 KB of pointers; check order of magnitude.
         self.assertGreater(kb, 100.0)
 
     def test_retained_bytes_tracks_a_known_allocation(self):
-        # 1 MiB bytearrays: RSS growth per object should be near 1 MiB.
+        # RSS growth per 1 MiB bytearray should be near 1 MiB.
         per_object = harness.measure_retained_bytes(lambda: bytearray(1024 * 1024),
                                                     count=32)
         if per_object is None:

@@ -2,10 +2,6 @@
 Run all three benchmarks and print a side-by-side comparison.
 Saves results to results.json for use by plot_results.py.
 
-Every number is a mean over `--repeats` timed calls, taken after a discarded
-warm-up phase. Dispersion (SD and a 95% confidence interval on the mean) is
-reported alongside, so the comparison states how stable each measurement is.
-
 Usage: python run_comparison.py [--repeats 1000] [--warmup 50]
 """
 
@@ -40,8 +36,7 @@ HE_OPS = [
     ("Decrypt", "decrypt"),
 ]
 
-# Operations that also exist in the plaintext baseline, so a per-operation
-# overhead ratio is meaningful for them.
+# Operations that also exist in the plaintext baseline, so the ratio is meaningful.
 COMPARABLE_OPS = [
     ("Add", "add"),
     ("Multiply", "mul"),
@@ -81,13 +76,8 @@ def print_timing_table(pt, ts, fhe):
         print(f"{name:<14}{p_s}{t_s}{f_s}{t_o}{f_o}")
 
     print("-" * W)
-    # Two totals, because one number cannot honestly serve both purposes.
-    # The comparable total sums the SAME five operations on both sides — the only
-    # ratio that is a like-for-like slowdown. The session total additionally
-    # charges encryption and decryption, which plaintext has no analogue for; it
-    # is a deployment cost, not a slowdown. An earlier version divided a
-    # seven-operation encrypted total by a five-operation plaintext one and
-    # labelled the result a slowdown.
+    # Two totals: the comparable total sums the same five ops on both sides (a
+    # valid ratio); the session total adds encrypt/decrypt, which plaintext lacks.
     pt_total = sum(mean_ms(pt, k) for _, k in COMPARABLE_OPS)
     ts_total = sum(mean_ms(ts, k) for _, k in COMPARABLE_OPS)
     fhe_total = sum(mean_ms(fhe, k) for _, k in COMPARABLE_OPS) if fhe else None
@@ -107,7 +97,7 @@ def print_timing_table(pt, ts, fhe):
 
 
 def print_dispersion_table(ts, fhe):
-    """Show that the means are stable, not single noisy samples."""
+    """Print relative SD and 95% CI half-width for each mean."""
     print()
     print("=" * W)
     print(f"{'Measurement Stability (relative standard deviation of each mean)':^{W}}")
@@ -146,11 +136,7 @@ def print_memory_table(pt, ts, fhe):
 
 
 def benchmark_key_generation(repeats, warmup):
-    """Time context + key generation, the one-off setup cost of each library.
-
-    This is a per-session cost rather than a per-operation one, so it is timed
-    separately and with fewer repetitions than the operations themselves.
-    """
+    """Time context + key generation, the one-off setup cost of each library."""
     print(f"Timing key generation ({repeats} repetitions)...")
     keygen = {"repeats": repeats, "warmup": warmup}
     keygen["tenseal"] = harness.time_operation(

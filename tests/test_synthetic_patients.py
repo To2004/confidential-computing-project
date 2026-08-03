@@ -1,9 +1,5 @@
 """
-Tests for the synthetic cohort and the synthetic risk score.
-
-The score is the reference that every encrypted result is checked against, so if
-it is wrong the whole risk-score experiment silently measures the wrong thing.
-It is therefore checked against a patient worked out by hand.
+Tests for the synthetic cohort and the plaintext risk score.
 
 Run with:  python -m unittest discover -p 'test_*.py'
 """
@@ -12,8 +8,7 @@ import os
 import sys
 import unittest
 
-# The modules under test live in src/; make them importable however the tests
-# are invoked (unittest discover from the repo root, or pytest, or directly).
+# Modules under test live in src/.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "src"))
 
 
@@ -37,7 +32,7 @@ class TestNormalization(unittest.TestCase):
             self.assertAlmostEqual(norm[name][1], 1.0, places=12, msg=name)
 
     def test_affine_form_matches_direct_normalization(self):
-        """The encrypted path uses scale/offset; it must agree with (x-min)/(max-min)."""
+        """scale/offset form must agree with (x-min)/(max-min)."""
         rng = np.random.default_rng(1)
         for name in patients.FEATURES:
             low, high = patients.RANGES[name]
@@ -57,13 +52,8 @@ class TestNormalization(unittest.TestCase):
 class TestRiskScore(unittest.TestCase):
 
     def test_hand_computed_patient(self):
-        """A patient at the midpoint of every reference range.
-
-        Every normalized feature is 0.5, so the score reduces to
-            100 * (0.80*0.5 + 0.10*0.25 + 0.05*0.25 + 0.05*0.25)
-          = 100 * (0.40 + 0.025 + 0.0125 + 0.0125) = 45.0
-        where 0.80 is the sum of the five linear weights and each product term
-        contributes weight * 0.5 * 0.5.
+        """Midpoint of every range: all normalized features are 0.5, so
+        100 * (0.80*0.5 + 0.10*0.25 + 0.05*0.25 + 0.05*0.25) = 45.0.
         """
         cohort = {}
         for name in patients.FEATURES:
@@ -83,7 +73,7 @@ class TestRiskScore(unittest.TestCase):
                                places=10)
 
     def test_score_is_term_by_term_what_the_formula_says(self):
-        """Independent re-derivation, so a typo'd weight cannot pass unnoticed."""
+        """Re-derive the score with the weights written out explicitly."""
         rng = np.random.default_rng(7)
         cohort = {}
         for name in patients.FEATURES:
@@ -105,13 +95,7 @@ class TestRiskScore(unittest.TestCase):
                                    rtol=0, atol=1e-12)
 
     def test_interaction_terms_actually_matter(self):
-        """Guard against the score degenerating into a plain weighted average.
-
-        If the interaction and quadratic terms were dropped, the score would
-        become a weighted average — which is the very thing this experiment
-        exists to move beyond. Two patients with the same linear part but
-        different products must score differently.
-        """
+        """Two patients differing only in the product terms must score differently."""
         norm_a = {"age": 0.5, "systolic_bp": 0.9, "bmi": 0.5,
                   "cholesterol": 0.5, "glucose": 0.1}
         norm_b = {"age": 0.5, "systolic_bp": 0.1, "bmi": 0.5,
@@ -122,9 +106,8 @@ class TestRiskScore(unittest.TestCase):
                                  + norm[n] * (patients.RANGES[n][1] - patients.RANGES[n][0])])
                     for n in patients.FEATURES}
 
-        # bp and glucose carry different linear weights (0.20 vs 0.15), so the
-        # linear parts differ; the point is that the gap is larger than that
-        # difference alone because of the bp^2 term.
+        # bp and glucose have different linear weights (0.20 vs 0.15); the gap
+        # must exceed that difference alone, thanks to the bp^2 term.
         score_a = patients.plaintext_risk_scores(to_raw(norm_a))[0]
         score_b = patients.plaintext_risk_scores(to_raw(norm_b))[0]
         linear_only_gap = 100 * (0.20 * 0.9 + 0.15 * 0.1) - 100 * (0.20 * 0.1 + 0.15 * 0.9)
@@ -145,8 +128,7 @@ class TestCohortGeneration(unittest.TestCase):
         self.assertFalse(np.array_equal(a["age"], b["age"]))
 
     def test_every_value_is_inside_its_public_range(self):
-        """Clipping must hold, or a normalized feature could leave [0, 1] and
-        the score could exceed 100."""
+        """Values must be clipped, otherwise a normalized feature can leave [0, 1]."""
         cohort = patients.generate_cohort(5000, seed=99)
         for name in patients.FEATURES:
             low, high = patients.RANGES[name]
@@ -167,12 +149,10 @@ class TestCohortGeneration(unittest.TestCase):
             patients.generate_cohort(0)
 
     def test_declared_depth_matches_the_term_structure(self):
-        """The declared depth drives the crypto parameters, so it must not drift
-        away from the score definition."""
+        """The declared depth sets the crypto parameters, so keep it in sync."""
         depth = patients.multiplicative_depth_required()
         self.assertEqual(depth["total"], sum(v for k, v in depth.items() if k != "total"))
-        # A ciphertext-by-ciphertext product exists, so at least one level of
-        # genuine multiplicative depth is required beyond constant scaling.
+        # Ciphertext-by-ciphertext products need depth beyond constant scaling.
         self.assertTrue(patients.INTERACTION_WEIGHTS or patients.SQUARE_WEIGHTS)
         self.assertGreaterEqual(depth["total"], 3)
 
@@ -180,11 +160,8 @@ class TestCohortGeneration(unittest.TestCase):
 class TestPaddingInvariant(unittest.TestCase):
 
     def test_padding_with_the_range_minimum_contributes_nothing(self):
-        """The encrypted path pads to a power of two with each feature's minimum.
-
-        Those slots must normalize to 0 and score 0, otherwise they corrupt the
-        cohort sum. Padding with zeros instead would NOT satisfy this, which is
-        exactly the trap this test pins down.
+        """Padding to a power of two uses each feature's minimum, so the padded
+        slots normalize to 0 and score 0 instead of corrupting the cohort sum.
         """
         import risk_score_benchmark as rsb
 
@@ -194,13 +171,12 @@ class TestPaddingInvariant(unittest.TestCase):
         scores = patients.plaintext_risk_scores(padded)
         np.testing.assert_allclose(scores[100:], 0.0, rtol=0, atol=1e-12)
 
-        # The real patients are untouched by padding.
         np.testing.assert_allclose(scores[:100],
                                    patients.plaintext_risk_scores(cohort),
                                    rtol=0, atol=1e-12)
 
     def test_padding_with_zeros_would_corrupt_the_sum(self):
-        """Documents why the minimum, not zero, is the correct pad value."""
+        """Why the pad value is the range minimum and not zero."""
         cohort = patients.generate_cohort(100, seed=11)
         zero_padded = {n: np.concatenate([cohort[n], np.zeros(28)])
                        for n in patients.FEATURES}

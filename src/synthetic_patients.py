@@ -1,25 +1,9 @@
 """
-Synthetic patient cohort and the synthetic medical risk score.
+Synthetic patient cohort and a synthetic risk score used as the HE benchmark
+workload. The score is made up for this project: it is not a clinical model and
+has no medical meaning.
 
-IMPORTANT — this risk score is a synthetic construct built for demonstration
-purposes only. It is NOT a validated clinical model, it is not derived from any
-medical literature, and it must not be interpreted as a real assessment of
-patient risk. Its only purpose is to give the homomorphic-encryption benchmark a
-computation that is richer than a single average: it mixes additions,
-multiplications by public constants, multiplications between two encrypted
-values, and a squared term, so it exercises real multiplicative depth.
-
-The cohort is likewise synthetic: values are drawn from plausible-looking
-distributions, not sampled from patients.
-
-Score definition
-----------------
-Each of the five features is first mapped to roughly [0, 1] by min-max
-normalization against a *public* reference range:
-
-    x_norm = (x - min_value) / (max_value - min_value)
-
-The score then combines the normalized features:
+Features are min-max normalized against public reference ranges, then combined:
 
     risk_score = 100 * ( 0.15 * age_norm
                        + 0.20 * bp_norm
@@ -30,25 +14,18 @@ The score then combines the normalized features:
                        + 0.05 * bmi_norm * cholesterol_norm
                        + 0.05 * bp_norm ** 2 )
 
-The first five terms are a weighted average. The last three are what make the
-score interesting for HE: two interaction terms between distinct features and
-one quadratic term, all of which require ciphertext x ciphertext multiplication
-rather than only multiplication by a plaintext constant. The eight weights sum
-to 1.0, so a patient at the top of every reference range scores 100.
+The two interaction terms and the square need ciphertext x ciphertext
+multiplication, so the circuit has real multiplicative depth. Weights sum to
+1.0, so the maximum possible score is 100.
 
-Why the reference ranges are public
------------------------------------
-The min and max used for normalization are fixed published ranges, not
-statistics computed from the cohort. This matters for the encrypted version:
-deriving min/max from the data would require comparisons between ciphertexts,
-which CKKS does not support natively (it would need an expensive polynomial
-approximation of a step function). Using public ranges keeps normalization an
-affine transformation, which CKKS performs cheaply.
+The normalization ranges are fixed public values rather than cohort statistics
+because computing min/max under CKKS would need ciphertext comparisons, which
+CKKS does not support natively.
 """
 
 import numpy as np
 
-# Feature order is fixed: it defines the order of ciphertexts everywhere.
+# Feature order is fixed: it defines the ciphertext order everywhere.
 FEATURES = ("age", "systolic_bp", "bmi", "cholesterol", "glucose")
 
 # Public reference ranges (min, max) used for min-max normalization.
@@ -60,8 +37,7 @@ RANGES = {
     "glucose": (70.0, 200.0),
 }
 
-# Distribution used by the generator: age is uniform over its range, the four
-# clinical measures are normal around a plausible centre and then clipped.
+# Sampling distributions: age uniform over its range, the rest normal then clipped.
 DISTRIBUTIONS = {
     "age": {"kind": "uniform"},
     "systolic_bp": {"kind": "normal", "mean": 125.0, "sd": 15.0},
@@ -70,8 +46,7 @@ DISTRIBUTIONS = {
     "glucose": {"kind": "normal", "mean": 100.0, "sd": 20.0},
 }
 
-# Weights of the eight score terms. Linear terms first, then the two
-# interactions, then the quadratic term. They sum to 1.0.
+# The eight score weights; they sum to 1.0.
 LINEAR_WEIGHTS = {
     "age": 0.15,
     "systolic_bp": 0.20,
@@ -99,9 +74,8 @@ DISCLAIMER = (
 def generate_cohort(n_patients=DEFAULT_N_PATIENTS, seed=DEFAULT_SEED):
     """Generate a synthetic cohort as a column-per-feature dict of arrays.
 
-    Column-major layout is deliberate: the encrypted version packs one feature
-    into one ciphertext, with one CKKS slot per patient, so that a single
-    homomorphic operation advances all patients at once (SIMD).
+    Column-major so the encrypted version can pack one feature per ciphertext,
+    one patient per CKKS slot.
     """
     if n_patients < 1:
         raise ValueError(f"n_patients must be >= 1, got {n_patients}")
@@ -115,8 +89,7 @@ def generate_cohort(n_patients=DEFAULT_N_PATIENTS, seed=DEFAULT_SEED):
             values = rng.uniform(low, high, size=n_patients)
         else:
             values = rng.normal(spec["mean"], spec["sd"], size=n_patients)
-        # Clip so every value stays inside the public reference range, which
-        # keeps every normalized feature inside [0, 1].
+        # Clip to the reference range so normalized values stay in [0, 1].
         cohort[name] = np.clip(values, low, high)
     return cohort
 
@@ -133,9 +106,7 @@ def normalize_cohort(cohort):
 def normalization_affine_terms(name):
     """Return (scale, offset) such that x_norm == x * scale + offset.
 
-    The encrypted implementation applies normalization in this affine form,
-    because CKKS multiplies by a plaintext constant and adds a plaintext
-    constant far more cheaply than it divides.
+    The encrypted path uses this affine form; CKKS has no division.
     """
     low, high = RANGES[name]
     scale = 1.0 / (high - low)
@@ -160,8 +131,7 @@ def plaintext_risk_scores(cohort):
 def multiplicative_depth_required():
     """Multiplicative depth consumed by the encrypted score, per stage.
 
-    Both libraries must be configured for at least this depth or the ciphertext
-    runs out of levels partway through the circuit.
+    Both libraries must be configured for at least this depth.
     """
     return {
         "normalization (x * scale + offset)": 1,

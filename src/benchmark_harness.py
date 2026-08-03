@@ -1,39 +1,10 @@
 """
-Shared measurement harness for all benchmarks in this project.
+Shared measurement harness for all benchmarks in this project: timing, memory,
+summary statistics and drift diagnostics.
 
-Every timed operation goes through `time_operation`, which runs a warm-up phase
-that is discarded and then `repeats` individually timed calls. The reported
-figure is the mean over those calls, together with dispersion statistics so the
-report can state how stable each measurement is.
-
-Rationale for the warm-up: the first calls into TenSEAL/OpenFHE pay one-off
-costs that are not part of the steady-state cost of the operation — dynamic
-loading of the native library, lazy allocation of NTT tables and evaluation-key
-caches, first-touch page faults on freshly mapped memory, and CPU frequency
-ramp-up. Including them would inflate the mean and, worse, make the mean depend
-on how many repetitions were run.
-
-Three things this harness does beyond taking a mean, all of which matter for
-believing the numbers:
-
-* **Robust statistics alongside the mean.** Timing distributions are bounded
-  below and have a long right tail (an unlucky call can be descheduled, but no
-  call can take less than the work requires). A mean is pulled around by that
-  tail; the median and a 10% trimmed mean are not. Reporting both shows whether
-  a difference is real or is one outlier.
-* **Drift detection.** These benchmarks run on a shared login node. If another
-  user's job lands mid-measurement, or the CPU thermally throttles, the samples
-  are not identically distributed and a confidence interval computed from them
-  is meaningless. `time_operation` therefore compares the first half of the
-  samples against the second half and reports the difference, so contaminated
-  measurements can be spotted instead of averaged.
-* **Raw samples are kept.** The per-call durations go into the results JSON, so
-  any later question about the distribution can be answered without re-running
-  a benchmark that takes over an hour.
-
-Timing and memory are measured in *separate* passes: `tracemalloc` adds a hook
-to every Python allocation and measurably distorts short timings, so it is never
-active while the clock is running.
+Timing and memory are measured in separate passes; `tracemalloc` hooks every
+Python allocation and distorts short timings, so it is never active while the
+clock is running.
 """
 
 import gc
@@ -47,17 +18,13 @@ import tracemalloc
 # Defaults used by every benchmark unless overridden on the command line.
 DEFAULT_REPEATS = 1000
 DEFAULT_WARMUP = 50
-
-# Repetitions for the memory pass. Peak Python-side memory is close to
-# deterministic, so a handful of samples is enough and keeps runtime sane.
 DEFAULT_MEMORY_REPEATS = 5
 
-# Number of live objects used to measure retained native memory. Large enough
-# that the RSS growth dwarfs allocator noise, small enough to stay well inside RAM.
+# Live objects used to measure retained native memory: enough that RSS growth
+# dwarfs allocator noise, small enough to stay inside RAM.
 DEFAULT_RETAIN_COUNT = 50
 
-# Relative difference between the first and second half of the samples above
-# which a measurement is flagged as drifting rather than steady.
+# |first-half vs second-half| difference above which a measurement is flagged.
 DRIFT_WARN_PCT = 5.0
 
 # Fixed seed so the bootstrap interval is reproducible run to run.
@@ -72,12 +39,7 @@ SRC_ROOT = os.path.dirname(os.path.abspath(__file__))
 # ── public API ───────────────────────────────────────────────────────────────
 
 def summarize(samples_s, warmup=0, bootstrap=True):
-    """Summary statistics for a list of per-call durations in seconds.
-
-    Returns milliseconds, which is the unit used throughout the report. Includes
-    both mean-based and robust (median-based) statistics, plus the drift and
-    outlier diagnostics described in the module docstring.
-    """
+    """Summary statistics for per-call durations in seconds. All outputs in ms."""
     if not samples_s:
         raise ValueError("summarize() requires at least one sample")
 
@@ -99,17 +61,14 @@ def summarize(samples_s, warmup=0, bootstrap=True):
         "max_ms": ordered_ms[-1],
         "p95_ms": _percentile(ordered_ms, 95.0),
         "p99_ms": _percentile(ordered_ms, 99.0),
-        # Reported for reference only. It assumes independent samples, which
-        # timings taken back-to-back in a loop are NOT — see ci95_half_width_ms
-        # below, which is the interval this project actually reports.
+        # Assumes independent samples, which back-to-back timings are not.
         "ci95_iid_half_width_ms": _Z95 * std_ms / (n ** 0.5) if n > 1 else 0.0,
-        # Default so `summarize` alone is usable; `time_operation` replaces this
-        # with the batch-means interval once it has the acquisition order.
+        # Placeholder: time_operation overwrites this with the batch-means
+        # interval, which it can compute because it has the acquisition order.
         "ci95_half_width_ms": _Z95 * std_ms / (n ** 0.5) if n > 1 else 0.0,
         "ci95_method": "iid (no acquisition order available)",
         "rel_std_pct": (std_ms / mean_ms * 100.0) if mean_ms > 0 else 0.0,
-        # How far the mean sits above the median, in units of the median. A long
-        # right tail shows up here; a symmetric distribution gives ~0.
+        # How far the mean sits above the median, relative to the median.
         "mean_over_median_pct": ((mean_ms - median_ms) / median_ms * 100.0)
                                 if median_ms > 0 else 0.0,
         "outlier_fraction_pct": _outlier_fraction_pct(ordered_ms),
@@ -129,9 +88,8 @@ def time_operation(fn, repeats=DEFAULT_REPEATS, warmup=DEFAULT_WARMUP,
                    keep_samples=True):
     """Time `fn` over `repeats` calls after `warmup` discarded calls.
 
-    Garbage collection is disabled during the measured loop (the same approach
-    `timeit` takes) so that a collection triggered by unrelated allocations is
-    not attributed to the operation under test.
+    GC is disabled during the measured loop (as `timeit` does) so a collection
+    triggered by unrelated allocations is not charged to the operation.
     """
     if repeats < 1:
         raise ValueError(f"repeats must be >= 1, got {repeats}")
@@ -154,13 +112,10 @@ def time_operation(fn, repeats=DEFAULT_REPEATS, warmup=DEFAULT_WARMUP,
             gc.enable()
 
     stats = summarize(samples_s, warmup=warmup)
-    # Both of these need the samples in ACQUISITION order, which `summarize`
-    # sorts away, so they are computed here from the raw sequence.
+    # Needs samples in acquisition order, which summarize() sorts away.
     stats.update(_drift_diagnostics(samples_s))
 
-    # The reported interval is the dependence-aware one. Falling back to the iid
-    # formula when there are too few samples to batch is flagged, so a reader can
-    # tell which one they are looking at.
+    # Prefer the dependence-aware interval; ci95_method records the fallback.
     batched = _batch_means_half_width_ms(samples_s)
     if batched is None:
         stats["ci95_half_width_ms"] = stats["ci95_iid_half_width_ms"]
@@ -176,14 +131,13 @@ def time_operation(fn, repeats=DEFAULT_REPEATS, warmup=DEFAULT_WARMUP,
 
 
 def measure_peak_memory_kb(fn, repeats=DEFAULT_MEMORY_REPEATS):
-    """Peak *Python-side* memory of `fn`, in KB.
+    """Peak Python-side memory of `fn`, in KB.
 
-    Only Python allocations are visible to `tracemalloc`; TenSEAL and OpenFHE
-    hold ciphertexts in native C/C++ heaps, so this figure is a lower bound on
-    true usage and is reported as such. `measure_retained_bytes` is the
-    measurement that actually captures the native cost.
+    tracemalloc sees only Python allocations; TenSEAL/OpenFHE keep ciphertexts
+    in native heaps, so this is a lower bound. Use `measure_retained_bytes` for
+    the native cost.
     """
-    fn()  # warm-up: never counted, avoids charging one-off caches to the operation
+    fn()  # discarded warm-up call
     peaks_kb = []
     for _ in range(repeats):
         tracemalloc.start()
@@ -196,19 +150,15 @@ def measure_peak_memory_kb(fn, repeats=DEFAULT_MEMORY_REPEATS):
 def measure_retained_bytes(factory, count=DEFAULT_RETAIN_COUNT):
     """Average resident bytes retained per object produced by `factory`.
 
-    Builds `count` objects, keeps them all alive, and measures how far the
-    process resident set grows. Unlike `tracemalloc` this sees native
-    allocations, so it answers the question the report actually cares about:
-    how much RAM does one ciphertext occupy?
-
-    Returns None on platforms without /proc (the figure is Linux-only).
+    Builds `count` objects, keeps them alive, and measures RSS growth, so
+    native allocations are included. Returns None without /proc (Linux only).
     """
     rss_before = _current_rss_bytes()
     if rss_before is None:
         return None
 
-    # Settle the allocator first: the first object may trigger arena growth that
-    # would otherwise be charged to it.
+    # Settle the allocator first: the first object can trigger arena growth
+    # that would otherwise be charged to it.
     warm = [factory() for _ in range(min(5, count))]
     del warm
     gc.collect()
@@ -224,8 +174,7 @@ def measure_retained_bytes(factory, count=DEFAULT_RETAIN_COUNT):
         gc.collect()
 
     grown = rss_after - rss_before
-    # Allocator noise can make a tiny measurement come out negative; report 0
-    # rather than a meaningless negative size.
+    # Allocator noise can make a tiny measurement come out negative.
     return max(0.0, grown / count)
 
 
@@ -236,7 +185,7 @@ def benchmark_operations(operations, repeats=DEFAULT_REPEATS, warmup=DEFAULT_WAR
 
     `operations` maps a short key (e.g. "add") to a zero-argument callable.
     The returned dict carries, for every key:
-        <key>_time_s      mean seconds  — flat key kept for the plotting scripts
+        <key>_time_s      mean seconds (flat key used by the plotting scripts)
         <key>_mem_kb      mean peak Python-side KB
         <key>_time_stats  full statistics from `summarize`
     """
@@ -281,13 +230,10 @@ class AccuracyError(AssertionError):
 
 
 def assert_accuracy(results, thresholds, label=""):
-    """Fail loudly if any measured error exceeds its threshold.
+    """Fail if any measured error exceeds its threshold.
 
-    Without this, a mis-chosen modulus chain or an exhausted level budget
-    produces a benchmark that still runs, still prints plausible timings, and
-    silently reports numbers computed on garbage. The thresholds are deliberately
-    loose — several orders of magnitude above the errors actually observed — so
-    this catches breakage, not ordinary CKKS noise.
+    Thresholds are set orders of magnitude above the observed errors, so this
+    catches broken crypto parameters, not ordinary CKKS noise.
     """
     failures = []
     for key, limit in thresholds.items():
@@ -307,11 +253,10 @@ def assert_accuracy(results, thresholds, label=""):
 
 
 def environment_info():
-    """Machine and threading context, recorded so results are interpretable.
+    """Machine, threading and library-version context for the results file.
 
-    Thread count matters: both libraries use multithreaded native code, so a
-    timing taken on a busy shared node is not comparable with one taken on an
-    idle machine. Recording it makes that visible rather than invisible.
+    Thread settings are included because both libraries run multithreaded
+    native code, so timings are only comparable at the same thread count.
     """
     info = {
         "python_version": sys.version.split()[0],
@@ -338,10 +283,6 @@ def environment_info():
     except OSError:
         pass
 
-    # Library versions belong in the results file, not only in the report's
-    # prose: several conclusions here are explicitly version-scoped ("in the
-    # version tested, TenSEAL's decryption is bit-deterministic"), and a results
-    # file that cannot say which version it measured cannot support them.
     versions = {}
     for package in ("tenseal", "openfhe", "numpy", "matplotlib"):
         try:
@@ -439,10 +380,10 @@ def _median_absolute_deviation(sorted_values, median):
 
 
 def _outlier_fraction_pct(sorted_values):
-    """Percentage of samples beyond 1.5 IQR above the third quartile.
+    """Percentage of samples beyond 1.5 IQR above Q3.
 
-    Only the upper tail is counted: a timing cannot be anomalously fast, so a
-    low outlier is noise in the clock rather than a disturbed measurement.
+    Upper tail only: a call cannot take less time than the work requires, so a
+    low outlier is clock noise rather than a disturbed measurement.
     """
     if len(sorted_values) < 4:
         return 0.0
@@ -453,11 +394,7 @@ def _outlier_fraction_pct(sorted_values):
 
 
 def _bootstrap_median_ci(sorted_values):
-    """Percentile bootstrap 95% interval for the median.
-
-    The median has no simple closed-form standard error, so it is resampled.
-    Seeded, so repeated analysis of the same samples gives the same interval.
-    """
+    """Percentile bootstrap 95% interval for the median. Seeded, so reproducible."""
     import random
 
     rng = random.Random(BOOTSTRAP_SEED)
@@ -485,17 +422,11 @@ def _lag1_autocorrelation(values):
 
 
 def _batch_means_half_width_ms(samples_s, n_batches=25):
-    """95% interval half-width for the mean, valid under dependence.
+    """95% half-width for the mean using non-overlapping batch means.
 
-    Consecutive timings are not independent: they share cache, allocator, CPU
-    frequency and scheduler state. The textbook `s/sqrt(n)` interval assumes
-    independence, and on this project's own samples it is 2-6x too narrow
-    (lag-1 autocorrelation reaches 0.95).
-
-    Non-overlapping batch means restore validity cheaply: the mean of each
-    contiguous block is far closer to independent than the individual samples,
-    so the spread *between blocks* captures the dependence the naive formula
-    ignores. Returns None when there are too few samples to batch.
+    Consecutive timings are autocorrelated (shared cache, CPU frequency and
+    scheduler state), so s/sqrt(n) is far too narrow. The means of contiguous
+    blocks are much closer to independent. Returns None if n < 4 * n_batches.
     """
     n = len(samples_s)
     if n < n_batches * 4:
@@ -511,18 +442,14 @@ def _batch_means_half_width_ms(samples_s, n_batches=25):
 def _mann_kendall_z(values):
     """Normal-approximation Mann-Kendall statistic for a monotonic trend.
 
-    The halves comparison below only sees a *step* near the midpoint. A slow
-    monotonic ramp — thermal throttling, a gradually filling allocator — halves
-    its own apparent size under that test and slips through. Mann-Kendall is
-    rank-based, needs no distributional assumption, and detects the ramp.
-
-    |z| > 1.96 corresponds to a two-sided 5% level.
+    Rank-based, so it catches a slow ramp (thermal throttling, allocator
+    growth) that the halves comparison misses. |z| > 1.96 is the two-sided 5%
+    level.
     """
     n = len(values)
     if n < 10:
         return 0.0
-    # O(n log n) would need a Fenwick tree; n is 1000 here, so subsample the
-    # sequence to keep this O(m^2) check cheap without losing a monotonic signal.
+    # This loop is O(m^2), so subsample to cap m; a monotonic trend survives.
     step = max(1, n // 300)
     sub = values[::step]
     m = len(sub)
@@ -545,22 +472,12 @@ def _mann_kendall_z(values):
 
 
 def _drift_diagnostics(samples_s):
-    """Stationarity and dependence diagnostics, on samples in acquisition order.
+    """Stationarity and dependence diagnostics; samples must be in acquisition order.
 
-    Three complementary checks, because the first one alone is not enough:
-
-    * **halves comparison** — first half against second half. Catches a step
-      change near the midpoint. It is a display statistic, not a test: it is
-      blind to a monotonic ramp (which halves its own apparent size), to a
-      single spike, to any disturbance symmetric about the midpoint, and to
-      steady contamination present for the whole run.
-    * **Mann-Kendall** — a calibrated rank test for monotonic trend, which is
-      the case the halves comparison most often misses.
-    * **lag-1 autocorrelation** — how far the samples are from independent,
-      which is what decides whether a confidence interval on the mean is honest.
-
-    A measurement is flagged if either the halves gap exceeds the threshold or
-    the trend test is significant.
+    Reports three things: the first-half vs second-half gap (a step change
+    near the midpoint), the Mann-Kendall trend statistic (a monotonic ramp,
+    which the halves gap misses), and the lag-1 autocorrelation. Flagged if
+    the halves gap exceeds DRIFT_WARN_PCT or the trend test is significant.
     """
     n = len(samples_s)
     if n < 4:

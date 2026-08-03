@@ -1,92 +1,19 @@
 """
-The cost of making CKKS safe to release decrypted results (IND-CPA^D).
+Cost of OpenFHE's noise-flooding decryption mode (IND-CPA^D mitigation).
 
-The security gap
-----------------
-Every other experiment in this project treats CKKS as if confidentiality were
-settled once the data is encrypted. It is not, and the reason is specific to
-*approximate* homomorphic encryption.
+Beyond the scope of the project proposal; kept as an additional experiment.
 
-Li and Micciancio (EUROCRYPT 2021, "On the Security of Homomorphic Encryption on
-Approximate Numbers") showed that CKKS as originally specified is **not IND-CPA^D
-secure** — that is, it is not secure against an adversary who is allowed to see
-decryption results. The decrypted value of a CKKS ciphertext is the message plus
-an error term, and that error term depends on the secret key. An adversary who
-obtains enough approximate decryptions of ciphertexts it influenced can solve for
-the key. The attack is passive and practical; it does not require the server to
-misbehave beyond asking for decryptions.
+CKKS decryption returns the message plus a key-dependent error term, so
+releasing decrypted values leaks information about the secret key (Li and
+Micciancio, EUROCRYPT 2021). OpenFHE mitigates this with noise flooding, which
+needs two passes: EXEC_NOISE_ESTIMATION to measure the circuit's own error via
+Plaintext.GetLogError(), then EXEC_EVALUATION with that estimate.
 
-Why this matters for our scenario, specifically
------------------------------------------------
-Our healthcare use case is exactly the setting the attack targets. The hospital
-decrypts and then *publishes* a result — the cohort mean risk score. Under the
-plain IND-CPA reading of CKKS that is fine, because IND-CPA says nothing about
-released decryptions. Under IND-CPA^D it is the dangerous operation: each
-published aggregate is one approximate decryption handed to whoever reads it.
-The per-patient scores are worse still, since there are 1000 of them.
-
-The mitigation and what it costs
---------------------------------
-The standard countermeasure is **noise flooding**: before decryption, add noise
-large enough to statistically drown the key-dependent error, so the released
-value leaks nothing about the key. It cannot be applied blindly, because the
-flooding noise must exceed the circuit's own error — which is not known in
-advance. OpenFHE therefore implements a **two-pass protocol**:
-
-    pass 1  EXEC_NOISE_ESTIMATION   run the circuit, read back the noise via
-                                    Plaintext.GetLogError()
-    pass 2  EXEC_EVALUATION         rebuild the context with that estimate and
-                                    NOISE_FLOODING_DECRYPT, then run for real
-
-This script runs both passes and measures the price: the extra pass, the effect
-on ciphertext parameters, the effect on each operation, and the precision given
-up to the flooding noise.
-
-What we measured, and one thing that surprised us
--------------------------------------------------
-The decisive test of whether any decryption-noise defence is active is whether
-decryption is *randomized*: plain CKKS decryption is a deterministic function of
-the ciphertext and the key, so repeatedly decrypting one fixed ciphertext must
-return bit-identical results. Adding noise before release breaks that.
-
-Running that test on all three configurations:
-
-* **TenSEAL** — spread exactly 0. Decryption is deterministic, so TenSEAL offers
-  no decryption-noise defence at all and is directly exposed when decrypted
-  values are released.
-* **OpenFHE, default `FIXED_NOISE_DECRYPT`** — already randomized. We expected a
-  bare baseline here and found that OpenFHE adds decryption noise by default; the
-  mode name says so, but this is not something the library forces you to notice.
-* **OpenFHE, `NOISE_FLOODING_DECRYPT`** — randomized, with the magnitude
-  calibrated to the measured circuit noise instead of a conservative constant.
-
-What this experiment does NOT show
----------------------------------
-Observing randomized decryption shows a defence is *active*. It does not show
-that the defence is *sufficient*, and the literature is explicit that it is not.
-
-OpenFHE estimates the circuit's noise empirically, by measuring precision loss in
-the imaginary slots of a trial decryption. That is an **average-case** estimate.
-Guo, Nabokov, Suvanto and Johansson (USENIX Security 2024, "Key Recovery Attacks
-on Approximate Homomorphic Encryption with Non-Worst-Case Noise Flooding
-Countermeasures") show that noise flooding built on non-worst-case noise
-estimation remains vulnerable to key recovery — explicitly including deployments
-that implement the differential-privacy bounds of Li, Micciancio, Schultz and
-Sorrell (CRYPTO 2022). Average-case analysis assumes the input ciphertexts are
-independent, and that assumption fails when a circuit combines correlated inputs,
-which our risk-score circuit does.
-
-Cheon-style provable IND-CPA^D flooding needs a variance high enough to cost
-substantial message precision (see "Revisiting the Security of Approximate FHE
-with Noise-Flooding Countermeasures", PKC 2025). OpenFHE's own follow-up work
-(ePrint 2024/203, "Application-Aware Approximate Homomorphic Encryption")
-exists specifically to counter the Guo et al. attacks, and is a proof of concept
-rather than the default behaviour of the release used here (1.4.1).
-
-So the honest reading of the numbers below is: **enabling flooding raises the bar
-and costs roughly 2x on decryption plus an entire extra pass, but the resulting
-configuration is not known to be IND-CPA^D secure.** Treating it as "the fix"
-would misrepresent the state of the art.
+This script measures what the mode costs and checks whether decryption is
+randomized, which is the observable signature of any decryption-noise defence.
+Note that OpenFHE's estimate is average-case; Guo et al. (USENIX Security 2024)
+show that flooding built on non-worst-case estimates is still attackable, so the
+measured cost is the cost of a partial defence, not of security.
 
 Usage: python ind_cpad_flooding.py [--repeats 200]
 """
@@ -312,7 +239,7 @@ def main():
           f"discarded.\n")
 
     print("Pass 1 — EXEC_NOISE_ESTIMATION (measure the circuit's own noise):")
-    noise_estimate, est_ring = estimate_noise(cohort, batch_size, args.patients)
+    noise_estimate, est_ring, est_stats = estimate_noise(cohort, batch_size, args.patients)
     print(f"  GetLogError() = {noise_estimate:.4f}  "
           f"(log2 of the circuit's error; ring dimension {est_ring})\n")
 
@@ -338,6 +265,7 @@ def main():
         "repeats": args.repeats,
         "warmup": args.warmup,
         "noise_estimate_log2": noise_estimate,
+        "estimation_pass_time_stats": est_stats,
         "multiplicative_depth": MULT_DEPTH,
         "reference": "Li & Micciancio, EUROCRYPT 2021",
         "environment": harness.environment_info(),

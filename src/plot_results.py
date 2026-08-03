@@ -1,17 +1,8 @@
 """
 Generate charts from benchmark results.
 
-Reads:  results/*.json           (written by the benchmark scripts)
+Reads:  results/*.json    (written by the benchmark scripts)
 Saves:  figures/chart_*.png
-
-Bars and markers carry 95% confidence intervals on the mean, which is what the
-1000-repetition methodology buys: the error bars show that the reported means are
-stable rather than single noisy samples. Where an interval is too small to see,
-that is itself the result.
-
-The three series colours are a colourblind-safe categorical set (verified for
-deuteranopia, protanopia and tritanopia separation). Exact values for every bar
-live in the tables in final_report.md.
 """
 
 import json
@@ -28,12 +19,10 @@ import numpy as np
 
 import project_paths
 
-# Categorical palette, fixed slot order. Validated for CVD separation against a
-# light surface; replaces an earlier green/orange pairing that was
-# indistinguishable under deuteranopia.
-C_TS = "#2a78d6"   # slot 1, blue   — TenSEAL
-C_FHE = "#eb6834"  # slot 2, orange — OpenFHE
-C_PT = "#1baf7a"   # slot 3, aqua   — Plaintext
+# Colourblind-safe categorical palette.
+C_TS = "#2a78d6"   # TenSEAL
+C_FHE = "#eb6834"  # OpenFHE
+C_PT = "#1baf7a"   # Plaintext
 
 INK = "#0b0b0b"
 INK_SOFT = "#52514e"
@@ -45,7 +34,7 @@ ALL_OPS = ["Encrypt", "Add", "Multiply", "Sum", "Average", "Dot Product", "Decry
 ALL_OP_KEYS = ["encrypt", "add", "mul", "sum", "avg", "dot", "decrypt"]
 
 BAR_W = 0.38
-GAP = 0.02  # surface gap between adjacent bars, instead of a border around them
+GAP = 0.02  # gap between adjacent bars
 
 
 def apply_style():
@@ -62,7 +51,7 @@ def apply_style():
         "axes.spines.right": False,
         "grid.color": GRID,
         "grid.linewidth": 0.6,
-        "grid.linestyle": "-",  # solid hairline; dashed grids read as thresholds
+        "grid.linestyle": "-",
         "xtick.color": INK_SOFT,
         "ytick.color": INK_SOFT,
         "xtick.labelsize": 9,
@@ -74,7 +63,7 @@ def apply_style():
 
 
 def load(name, required=True):
-    """Load a results JSON by bare filename, from the project's results/ directory."""
+    """Load a results JSON by bare filename from results/."""
     path = project_paths.result_path(name)
     if not os.path.exists(path):
         if required:
@@ -90,7 +79,7 @@ def means_and_ci(results, keys):
     for key in keys:
         stats = results.get(f"{key}_time_stats")
         if stats is None:
-            # Older results files stored only the mean.
+            # Older results files store only the mean, with no CI.
             means.append(results[f"{key}_time_s"] * 1000)
             errs.append(0.0)
         else:
@@ -100,11 +89,7 @@ def means_and_ci(results, keys):
 
 
 def label_bars(ax, bars, values, fmt="{:.2f}", errs=None):
-    """Direct value labels above bars, in neutral ink rather than series colour.
-
-    When error bars are present the label clears the upper cap, so the two never
-    overlap.
-    """
+    """Write value labels above bars; errs offsets the label above the error cap."""
     for i, (bar, value) in enumerate(zip(bars, values)):
         top = bar.get_height()
         if errs is not None:
@@ -161,7 +146,7 @@ def chart_operations(data):
     ax.set_axisbelow(True)
     ax.legend(loc="upper left")
 
-    # Right panel: overhead versus plaintext, for the operations that exist in both.
+    # Right panel: overhead vs plaintext, for operations present in both.
     ax = axes[1]
     pt_mean, _ = means_and_ci(pt, OP_KEYS)
     ts_cmp, _ = means_and_ci(ts, OP_KEYS)
@@ -224,9 +209,8 @@ def chart_memory(data):
     ax.set_axisbelow(True)
     ax.legend()
 
-    # Right panel: what a ciphertext actually costs. Plotting only the left panel
-    # would present a figure the report itself calls misleading — the native heap
-    # holds six orders of magnitude more than Python can see.
+    # Right panel: real ciphertext size. tracemalloc misses the native heap, so
+    # resident-set growth and serialized size are also plotted.
     ax = axes[1]
     plaintext_bytes = len(data.get("vector", [])) * 8 or None
     groups, colours, labels = [], [], []
@@ -343,7 +327,7 @@ def chart_scaling(sc):
     ax.grid(True, alpha=0.6)
     ax.set_axisbelow(True)
     ax.legend()
-    # Direct-label the endpoints rather than every point.
+    # Label the last point of each series only.
     for series, colour in [(ts_ms, C_TS)] + ([(fhe_ms, C_FHE)] if fhe_ok else []):
         ax.annotate(f"{series[-1]:,.0f} ms", xy=(sizes[-1], series[-1]),
                     xytext=(-6, 8), textcoords="offset points",
@@ -385,7 +369,7 @@ def chart_risk_score(rs):
 
     fig, axes = plt.subplots(1, 3, figsize=(16.5, 5))
 
-    # Panel 1: per-stage mean time.
+    # Panel 1: per-stage mean time
     ax = axes[0]
     x = np.arange(len(stage_labels))
     n_libs = len(libs)
@@ -405,7 +389,7 @@ def chart_risk_score(rs):
     ax.set_axisbelow(True)
     ax.legend(loc="upper right")
 
-    # Panel 2: distribution of the plaintext reference scores.
+    # Panel 2: distribution of the plaintext reference scores
     ax = axes[1]
     try:
         import synthetic_patients as patients
@@ -414,7 +398,7 @@ def chart_risk_score(rs):
         counts, _, _ = ax.hist(scores, bins=40, color=C_PT,
                                edgecolor="white", linewidth=0.5)
         mean_score = float(np.mean(scores))
-        # Headroom for the annotation, so it never sits on top of a bar.
+        # Headroom so the annotation does not sit on a bar.
         ax.set_ylim(0, counts.max() * 1.18)
         ax.axvline(mean_score, color=INK, linewidth=1.4)
         ax.annotate(f"cohort mean {mean_score:.2f}",
@@ -430,7 +414,7 @@ def chart_risk_score(rs):
         ax.text(0.5, 0.5, f"distribution unavailable\n({exc})", ha="center",
                 va="center", transform=ax.transAxes, fontsize=8, color=INK_SOFT)
 
-    # Panel 3: accuracy of the encrypted score.
+    # Panel 3: accuracy of the encrypted score
     ax = axes[2]
     metrics = [("Max abs\nerror", "score_max_abs_error"),
                ("Mean abs\nerror", "score_mean_abs_error"),
@@ -466,7 +450,7 @@ def chart_risk_score(rs):
 # ── Chart 6: Matched-parameter comparison ────────────────────────────────────
 
 def chart_matched(mc):
-    """What survives when OpenFHE is put on TenSEAL's parameters."""
+    """Plot speed and error for OpenFHE arms against TenSEAL at matched parameters."""
     arms = mc["arms"]
     order = [k for k in ("tenseal", "openfhe_default") if k in arms] + \
             [k for k in arms if k.startswith("openfhe_matched")]
@@ -479,8 +463,7 @@ def chart_matched(mc):
         return "OpenFHE matched\n" + key.replace("openfhe_matched_", "").upper()
 
     labels = [short(k) for k in order]
-    # The reference is a different library, so it gets the reference colour; the
-    # OpenFHE arms share one colour because they are all the same library.
+    # TenSEAL first, then all OpenFHE arms in one colour.
     colours = [C_TS] + [C_FHE] * (len(order) - 1)
 
     mul_ms = [arms[k]["mul_time_stats"]["mean_ms"] for k in order]
@@ -532,7 +515,7 @@ def chart_matched(mc):
 # ── Chart 7: IND-CPA^D noise flooding ────────────────────────────────────────
 
 def chart_ind_cpad(ic):
-    """Cost of the flooding defence, and which libraries randomize decryption."""
+    """Plot the timing cost of noise flooding and the decryption spread per library."""
     ops = [("Encrypt", "encrypt"), ("Multiply", "mul"),
            ("Sum", "sum"), ("Decrypt", "decrypt")]
     base_ms = [ic["baseline"][f"{k}_time_stats"]["mean_ms"] for _, k in ops]
@@ -565,8 +548,8 @@ def chart_ind_cpad(ic):
                 xytext=(14, 6), textcoords="offset points", fontsize=10,
                 fontweight="bold", color=INK)
 
-    # Right: is decryption randomized at all? Zero cannot be drawn on a log axis,
-    # so the deterministic case is drawn at the floor and labelled explicitly.
+    # Right panel: decryption spread. Zero cannot be drawn on a log axis, so a
+    # zero spread is drawn at an artificial floor.
     ax = axes[1]
     spreads = [
         ("TenSEAL\n(no setting)", ic["tenseal_decryption_spread"]["max_range_across_slots"], C_TS),
@@ -578,8 +561,7 @@ def chart_ind_cpad(ic):
     heights = [v if v > 0 else floor for _, v, _ in spreads]
     xs = np.arange(len(spreads))
     ax.bar(xs, heights, 0.55, color=[c for _, _, c in spreads])
-    # Labelled by hand rather than via label_bars: the deterministic case is
-    # drawn at an artificial floor and must be labelled "0", not its bar height.
+    # Not label_bars: a floored bar must be labelled 0, not its drawn height.
     for i, (_, value, _) in enumerate(spreads):
         text = "0 — deterministic" if value == 0 else f"{value:.1e}"
         ax.annotate(text, xy=(i, heights[i]), xytext=(0, 4),

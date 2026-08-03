@@ -1,10 +1,7 @@
-"""
-Where the project keeps its inputs and outputs.
+"""Project input/output directories.
 
-Every script resolves its paths through this module rather than through the
-current working directory, so `python src/run_comparison.py` and
-`cd src && python run_comparison.py` write to the same place. Paths are derived
-from this file's own location, which is the only fixed point available.
+Paths come from this file's location, not the working directory, so scripts
+write to the same place however they are launched.
 """
 
 import os
@@ -31,7 +28,7 @@ def figure_path(filename):
 
 
 def relative_to_root(path):
-    """Path shown to the user, relative to the repository root when possible."""
+    """Path relative to the repository root, or unchanged if that is impossible."""
     try:
         return os.path.relpath(path, REPO_ROOT)
     except ValueError:  # different drive on Windows

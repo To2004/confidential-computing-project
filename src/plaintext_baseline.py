@@ -1,10 +1,6 @@
 """
-Plaintext Baseline — the same operations without encryption.
-Used as the comparison reference for overhead calculations.
-
-Each operation is timed separately over many repetitions after a discarded
-warm-up phase, so that plaintext and encrypted figures are directly comparable
-per operation rather than only in aggregate.
+Plaintext baseline: the same five operations without encryption.
+Reference point for the overhead ratios.
 
 Usage: python plaintext_baseline.py [--repeats 1000] [--warmup 50]
 """
@@ -24,6 +20,7 @@ OP_NAMES = [
 
 def run_benchmark(vector, repeats=harness.DEFAULT_REPEATS, warmup=harness.DEFAULT_WARMUP,
                   memory_repeats=harness.DEFAULT_MEMORY_REPEATS, verbose=True):
+    """Time the five plaintext operations on `vector` and return the results dict."""
     n = len(vector)
     vector2 = [v * 0.5 + 1.0 for v in vector]
 
@@ -40,11 +37,10 @@ def run_benchmark(vector, repeats=harness.DEFAULT_REPEATS, warmup=harness.DEFAUL
         memory_repeats=memory_repeats, label="Plaintext", verbose=verbose,
     )
 
-    # Total across the five operations, the reference for overhead ratios.
     results["total_time_s"] = sum(results[f"{key}_time_s"] for _, key in OP_NAMES)
     results["peak_mem_kb"] = max(results[f"{key}_mem_kb"] for _, key in OP_NAMES)
 
-    # Computed values, kept so the results can be eyeballed for sanity.
+    # Output values, for sanity-checking against the encrypted run.
     results["add_result"] = operations["add"]()
     results["mul_result"] = operations["mul"]()
     results["sum_result"] = operations["sum"]()
