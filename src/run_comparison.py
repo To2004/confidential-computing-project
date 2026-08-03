@@ -81,15 +81,29 @@ def print_timing_table(pt, ts, fhe):
         print(f"{name:<14}{p_s}{t_s}{f_s}{t_o}{f_o}")
 
     print("-" * W)
+    # Two totals, because one number cannot honestly serve both purposes.
+    # The comparable total sums the SAME five operations on both sides — the only
+    # ratio that is a like-for-like slowdown. The session total additionally
+    # charges encryption and decryption, which plaintext has no analogue for; it
+    # is a deployment cost, not a slowdown. An earlier version divided a
+    # seven-operation encrypted total by a five-operation plaintext one and
+    # labelled the result a slowdown.
     pt_total = sum(mean_ms(pt, k) for _, k in COMPARABLE_OPS)
-    ts_total = sum(mean_ms(ts, k) for _, k in HE_OPS)
-    fhe_total = sum(mean_ms(fhe, k) for _, k in HE_OPS) if fhe else None
+    ts_total = sum(mean_ms(ts, k) for _, k in COMPARABLE_OPS)
+    fhe_total = sum(mean_ms(fhe, k) for _, k in COMPARABLE_OPS) if fhe else None
+    ts_session = sum(mean_ms(ts, k) for _, k in HE_OPS)
+    fhe_session = sum(mean_ms(fhe, k) for _, k in HE_OPS) if fhe else None
 
     fhe_total_s = f"{fhe_total:>16.4f}" if fhe_total else f"{'unavailable':>16}"
-    print(f"{'Total':<14}{pt_total:>14.6f}{ts_total:>14.4f}{fhe_total_s}"
+    print(f"{'Total (5 ops)':<14}{pt_total:>14.6f}{ts_total:>14.4f}{fhe_total_s}"
           f"{ts_total / pt_total:>15,.0f}x"
           + (f"{fhe_total / pt_total:>15,.0f}x" if fhe_total else f"{'—':>16}"))
-    return pt_total, ts_total, fhe_total
+    fhe_sess_s = f"{fhe_session:>16.4f}" if fhe_session else f"{'unavailable':>16}"
+    print(f"{'Session (7)':<14}{'—':>14}{ts_session:>14.4f}{fhe_sess_s}"
+          f"{'—':>16}{'—':>16}")
+    print("Total sums the five operations plaintext also has. Session adds encrypt and")
+    print("decrypt, which plaintext has no analogue for — a deployment cost, not a ratio.")
+    return pt_total, ts_total, fhe_total, ts_session, fhe_session
 
 
 def print_dispersion_table(ts, fhe):
@@ -223,7 +237,7 @@ def main():
 
     keygen = benchmark_key_generation(args.keygen_repeats, min(args.warmup, 5))
 
-    pt_total, ts_total, fhe_total = print_timing_table(pt, ts, fhe)
+    pt_total, ts_total, fhe_total, ts_session, fhe_session = print_timing_table(pt, ts, fhe)
     print_keygen_table(keygen)
     print_dispersion_table(ts, fhe)
     print_memory_table(pt, ts, fhe)
@@ -244,10 +258,16 @@ def main():
         "openfhe": fhe,
         "key_generation": keygen,
         "openfhe_available": OPENFHE_AVAILABLE,
+        "environment": harness.environment_info(),
         "totals_ms": {
-            "plaintext": pt_total,
-            "tenseal": ts_total,
-            "openfhe": fhe_total,
+            "comparable_operations": {
+                "note": "same five operations on all three columns",
+                "plaintext": pt_total, "tenseal": ts_total, "openfhe": fhe_total,
+            },
+            "full_session": {
+                "note": "adds encrypt and decrypt; no plaintext analogue",
+                "tenseal": ts_session, "openfhe": fhe_session,
+            },
         },
     }
     with open(args.output, "w") as handle:

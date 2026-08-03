@@ -20,12 +20,26 @@ library rather than to the parameters is unsound.
 TenSEAL's `[60, 40, 40, 60]`. Whatever difference survives that is a property of
 the implementations.
 
-Note on security: pinning the ring dimension means OpenFHE no longer enforces a
-security level, so `HEStd_NotSet` is required. At ring dimension 8192 with a
-total modulus of 60+40+40+60 = 200 bits this still sits inside the HE standard's
-128-bit table, which is the same reasoning that makes TenSEAL's default
-configuration acceptable — but it is now our assertion rather than the library's
-check, and the report says so.
+Security of the matched arm — a correction
+-----------------------------------------
+An earlier version of this file argued that the pinned arm was still 128-bit
+secure, because the modulus OpenFHE reports at ring 8192 is 181-200 bits and
+SEAL's published ceiling at that ring dimension is 218. **That argument was
+wrong**, and this experiment now measures rather than asserts.
+
+Two things were missed. First, SEAL's ceiling bounds the *entire* coefficient
+modulus including the special key-switching prime, whereas OpenFHE's reported
+modulus does not include the auxiliary primes its HYBRID key switching carries —
+so the two numbers being compared were not the same quantity. Second, and
+decisively: given exactly this configuration and asked to choose a ring dimension
+at `HEStd_128_classic`, **OpenFHE selects 16384, not 8192**. The library refuses
+the very parameter set we pin it to. `probe_library_chosen_ring` below records
+that refusal in the results file.
+
+The matched arm is therefore run *below* 128-bit security, and the comparison
+trades security for parameter parity. That is still the right experiment — it is
+the only way to hold ring dimension and scale fixed across two libraries — but it
+must be reported as what it is, and the report now says so.
 
 The sweep also varies OpenFHE's *scaling technique*, which turns out to matter
 more for precision than the scaling factor does.
@@ -157,12 +171,43 @@ def openfhe_arm(vector, repeats, warmup, scaling_technique=None,
     results["mul_max_error"] = max(
         abs(a - v * v) for a, v in zip(out.GetRealPackedValue(), vector))
     results["ring_dimension"] = cc.GetRingDimension()
+    # Measured, not asserted: the previous version of this experiment claimed a
+    # modulus size in prose with no code behind it.
+    results["modulus_bits"] = int(cc.GetModulus()).bit_length()
     results["scale_bits"] = scale_bits
     results["scaling_technique"] = scaling_technique or "FLEXIBLEAUTOEXT (default)"
     results["arm"] = label
     results["security_level"] = ("HEStd_128_classic" if ring_dim is None
                                  else "HEStd_NotSet (ring dimension pinned)")
     return results
+
+
+def probe_library_chosen_ring(scale_bits=SCALE_BITS, first_mod_bits=FIRST_MOD_BITS):
+    """What ring dimension does OpenFHE itself pick for the matched parameters?
+
+    This is the evidence behind the retraction in the module docstring. If the
+    library, asked for `HEStd_128_classic` at this depth and scale, chooses a
+    ring dimension larger than the one we pin, then the pinned arm is running
+    below the security level it was claimed to meet.
+    """
+    findings = {}
+    for technique in SCALING_TECHNIQUES:
+        params = CCParamsCKKSRNS()
+        params.SetMultiplicativeDepth(MULT_DEPTH)
+        params.SetScalingModSize(scale_bits)
+        params.SetFirstModSize(first_mod_bits)
+        params.SetBatchSize(8)
+        params.SetSecurityLevel(fhe.HEStd_128_classic)
+        params.SetScalingTechnique(getattr(fhe.ScalingTechnique, technique))
+        cc = GenCryptoContext(params)
+        cc.Enable(PKESchemeFeature.PKE)
+        findings[technique] = {
+            "library_chosen_ring": cc.GetRingDimension(),
+            "pinned_ring": POLY_MODULUS_DEGREE,
+            "modulus_bits": int(cc.GetModulus()).bit_length(),
+            "pinned_arm_is_128_bit": cc.GetRingDimension() <= POLY_MODULUS_DEGREE,
+        }
+    return findings
 
 
 def main():
@@ -186,6 +231,15 @@ def main():
           f"{args.warmup} discarded warm-up calls\n")
 
     arms = {}
+
+    print("Security check — what ring dimension does OpenFHE choose itself?")
+    ring_probe = probe_library_chosen_ring()
+    for technique, f in ring_probe.items():
+        verdict = ("pinned arm IS 128-bit secure" if f["pinned_arm_is_128_bit"]
+                   else "pinned arm is NOT 128-bit secure")
+        print(f"  {technique:<16} library picks ring {f['library_chosen_ring']:>6}"
+              f"  (we pin {f['pinned_ring']})  -> {verdict}")
+    print()
 
     print("TenSEAL (reference):")
     arms["tenseal"] = tenseal_arm(VECTOR, args.repeats, args.warmup)
@@ -213,6 +267,7 @@ def main():
             "scale_bits": SCALE_BITS,
         },
         "environment": harness.environment_info(),
+        "library_chosen_ring_probe": ring_probe,
         "arms": arms,
     }
     with open(args.output, "w") as handle:

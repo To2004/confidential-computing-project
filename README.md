@@ -10,7 +10,7 @@ a single average.
 
 > ## 📄 **[Read the report → `final_report.pdf`](final_report.pdf)**
 >
-> 10 pages with figures. Markdown source: [`report/final_report.md`](report/final_report.md).
+> 9 pages. LaTeX source: [`report/final_report.tex`](report/final_report.tex).
 
 ## What is measured
 
@@ -108,7 +108,7 @@ measurements dropped from 30.9% to 2.9%. If you run on a shared machine anyway, 
 python -m unittest discover -s tests
 ```
 
-40 tests covering the statistics (against hand-computed values), the risk score
+47 tests covering the statistics (against hand-computed values), the risk score
 (against a hand-computed patient), and the ciphertext-padding invariant — the last
 of these guards an error that would otherwise produce plausible-looking wrong
 results.
@@ -127,26 +127,23 @@ results.
 
 Bars and markers carry 95% confidence intervals. Series colours are a
 colourblind-safe categorical set, checked for deuteranopia, protanopia and
-tritanopia separation.
+tritanopia separation. The PDF includes three of the seven; the rest duplicate
+tables in the text and are left out to keep the report short.
 
 ### Regenerating the report PDF
 
-`final_report.pdf` is built from `final_report.md`. It is **not** produced by
+`final_report.pdf` is built from `report/final_report.tex`. It is **not** produced by
 `run_all_benchmarks.sh`, because it needs a TeX toolchain that the benchmark
 environment does not otherwise require:
 
 ```bash
 cd report
-pandoc final_report.md -o ../final_report.pdf --pdf-engine=tectonic \
-  -H pandoc-header.tex -V geometry:margin=1.8cm -V colorlinks=true -V fontsize=10pt
+tectonic final_report.tex && mv final_report.pdf ..
 ```
 
-Run it from `report/` so the `../figures/…` image paths resolve; the PDF is
-written to the repository root. `pandoc-header.tex` scales the figures and pins
-their placement — without it the report runs to 11 pages instead of 10.
-
-Install those with `conda install -c conda-forge pandoc tectonic`. If you edit
-`final_report.md`, re-run this or the PDF will go stale.
+Run it from `report/` so the `../figures/…` image paths resolve. Install the toolchain
+with `conda install -c conda-forge tectonic`. The report is plain LaTeX; it was
+previously Markdown converted through pandoc.
 
 ## Methodology
 
@@ -212,7 +209,7 @@ docstring.
 ├── tests/                    unit tests (40, plain unittest)
 ├── results/                  benchmark output, JSON
 ├── figures/                  generated charts, PNG
-├── report/                   final_report.md (source) and the proposal
+├── report/                   final_report.tex (source) and the proposal
 └── notebooks/                self-contained Colab notebook
 ```
 
@@ -225,7 +222,7 @@ Start here:
 
 | I want to… | Go to |
 |---|---|
-| Read the findings | **[`final_report.pdf`](final_report.pdf)** |
+| Read the findings | **[`final_report.pdf`](final_report.pdf)** (9 pages) |
 | Understand the measurement method | [`src/benchmark_harness.py`](src/benchmark_harness.py) |
 | See the risk score definition | [`src/synthetic_patients.py`](src/synthetic_patients.py) |
 | Reproduce the numbers | `./run_all_benchmarks.sh` |

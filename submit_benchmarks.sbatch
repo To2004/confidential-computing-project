@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=he-benchmark
-#SBATCH --partition=cpu
+#SBATCH --partition=main
 #SBATCH --exclusive
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

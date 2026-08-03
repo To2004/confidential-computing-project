@@ -139,6 +139,93 @@ class TestDriftDetection(unittest.TestCase):
         self.assertIsNone(d["drift_pct"])
         self.assertFalse(d["drift_flagged"])
 
+    def test_monotonic_ramp_is_caught_by_the_trend_test(self):
+        """The blind spot that motivated adding Mann-Kendall.
+
+        A ramp halves its own apparent size under a first-half/second-half
+        comparison, so a real end-to-end drift of ~10% shows up as ~5% and slips
+        under the threshold. The rank test sees it plainly.
+        """
+        ramp = [0.010 * (1 + 0.0001 * i) for i in range(1000)]  # +10% end to end
+        d = harness._drift_diagnostics(ramp)
+        self.assertLess(abs(d["drift_pct"]), 6.0)      # halves barely notices
+        self.assertGreater(abs(d["trend_z"]), 1.96)    # trend test does
+        self.assertTrue(d["drift_flagged"])
+
+    def test_v_shape_cancels_in_the_halves_comparison(self):
+        """Documents a residual blind spot rather than claiming it is fixed.
+
+        A disturbance symmetric about the midpoint cancels exactly in the halves
+        statistic, and being non-monotonic it does not move the trend test
+        either. Neither check catches it; a change-point scan would.
+        """
+        n = 1000
+        v = [0.010 * (1 + 0.5 * abs(i - n / 2) / (n / 2)) for i in range(n)]
+        d = harness._drift_diagnostics(v)
+        self.assertLess(abs(d["drift_pct"]), 1.0)
+        self.assertFalse(d["halves_flagged"])
+
+    def test_autocorrelation_is_detected(self):
+        import random
+
+        # Genuinely independent draws: ACF near zero. (Note an *alternating*
+        # series would not do here — it is strongly NEGATIVELY autocorrelated,
+        # |ACF| ~ 1, which is dependence of a different sign, not independence.)
+        rng = random.Random(11)
+        independent = [rng.gauss(0.010, 2e-4) for _ in range(1000)]
+        self.assertLess(abs(harness._lag1_autocorrelation(independent)), 0.15)
+
+        # A strongly dependent series: each sample close to the previous one.
+        dependent, value = [], 0.010
+        for i in range(1000):
+            value += 1e-6 if i % 200 < 100 else -1e-6
+            dependent.append(value)
+        self.assertGreater(harness._lag1_autocorrelation(dependent), 0.9)
+
+
+class TestDependenceAwareInterval(unittest.TestCase):
+
+    def test_batch_means_interval_exceeds_iid_under_dependence(self):
+        """The correction this project's own data made necessary.
+
+        Timings taken back-to-back are autocorrelated, so s/sqrt(n) understates
+        the interval. On the project's real samples the understatement reached
+        6x; here a synthetic dependent series must show the same direction.
+        """
+        import random
+
+        rng = random.Random(20260730)
+        series, value = [], 0.010
+        for _ in range(1000):
+            value = 0.9 * value + 0.1 * 0.010 + rng.gauss(0, 2e-4)
+            series.append(value)
+
+        iid = harness.summarize(series)["ci95_iid_half_width_ms"]
+        batched = harness._batch_means_half_width_ms(series)
+        self.assertIsNotNone(batched)
+        self.assertGreater(batched, iid * 2)
+
+    def test_independent_samples_give_comparable_intervals(self):
+        import random
+
+        rng = random.Random(7)
+        series = [rng.gauss(0.010, 2e-4) for _ in range(1000)]
+        iid = harness.summarize(series)["ci95_iid_half_width_ms"]
+        batched = harness._batch_means_half_width_ms(series)
+        # No dependence to correct for, so the two should agree to within ~2x.
+        self.assertLess(batched / iid, 2.0)
+
+    def test_time_operation_reports_which_method_it_used(self):
+        stats = harness.time_operation(lambda: None, repeats=200, warmup=5,
+                                       keep_samples=False)
+        self.assertIn("ci95_method", stats)
+        self.assertIn("batch means", stats["ci95_method"])
+
+    def test_short_run_falls_back_to_iid_and_says_so(self):
+        stats = harness.time_operation(lambda: None, repeats=10, warmup=1,
+                                       keep_samples=False)
+        self.assertIn("iid", stats["ci95_method"])
+
 
 class TestTimeOperation(unittest.TestCase):
 
