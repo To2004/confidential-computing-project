@@ -469,7 +469,14 @@ def main():
 
     backends = [TenSEALRiskScore(cohort, args.patients)]
     if not args.skip_openfhe:
-        backends.append(OpenFHERiskScore(cohort, args.patients))
+        # OpenFHE ships Linux-only wheels built for one CPython version, so it is
+        # absent on many runtimes. Report the plaintext and TenSEAL columns rather
+        # than failing, as the other benchmarks do.
+        try:
+            backends.append(OpenFHERiskScore(cohort, args.patients))
+        except ImportError as exc:
+            print(f"\n[NOTE] OpenFHE unavailable on this platform: {exc}")
+            print("       Running the plaintext and TenSEAL versions only.\n")
 
     measured = {}
     for backend in backends:

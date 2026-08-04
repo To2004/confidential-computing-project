@@ -127,8 +127,9 @@ results.
 
 Bars and markers carry 95% confidence intervals. Series colours are a
 colourblind-safe categorical set, checked for deuteranopia, protanopia and
-tritanopia separation. The PDF includes three of the seven; the rest duplicate
-tables in the text and are left out to keep the report short.
+tritanopia separation. The PDF includes two of the seven; the rest duplicate tables
+in the text, or belong to experiments kept in the repository rather than the report,
+and are left out to keep it short.
 
 ### Regenerating the report PDF
 
@@ -209,7 +210,7 @@ docstring.
 ├── results/                  benchmark output, JSON
 ├── figures/                  generated charts, PNG
 ├── report/                   final_report.tex (source) and the proposal
-└── notebooks/                self-contained Colab notebook
+└── notebooks/                one Colab notebook per experiment
 ```
 
 Each directory has its own `README.md` describing what is in it and how it is
@@ -222,6 +223,7 @@ Start here:
 | I want to… | Go to |
 |---|---|
 | Read the findings | **[`final_report.pdf`](final_report.pdf)** |
+| Run one experiment interactively | [`notebooks/`](notebooks/) — one notebook per experiment |
 | Understand the measurement method | [`src/benchmark_harness.py`](src/benchmark_harness.py) |
 | See the risk score definition | [`src/synthetic_patients.py`](src/synthetic_patients.py) |
 | Reproduce the numbers | `./run_all_benchmarks.sh` |

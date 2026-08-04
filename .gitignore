@@ -6,3 +6,7 @@ venv/
 
 # SLURM job output
 slurm-*.out
+
+# Written by the notebooks, so a notebook run never overwrites results/ or figures/
+notebook_output/
+confidential-computing-project/

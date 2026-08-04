@@ -53,15 +53,14 @@ ciphertext size and accuracy. Every figure is a mean over 1000 repetitions after
 discarded warm-up. Our main finding is that there is no single overhead number. In
 TenSEAL, encrypted addition costs $153\times$ a plaintext addition, but summing one
 encrypted vector costs $32{,}832\times$ its plaintext equivalent. What separates
-them is whether the operation has to move data between ciphertext slots. Two
-follow-up experiments explain most of the rest. Growing the input from 5 to 500
-values raises encrypted time by only $7.3\times$ while plaintext time grows
-$33.8\times$, because CKKS charges per ciphertext rather than per value. And
-re-running OpenFHE at TenSEAL's parameters cuts its multiplication penalty from
+them is whether the operation has to move data between ciphertext slots. Re-running
+OpenFHE at TenSEAL's parameters then cuts its multiplication penalty from
 $6.89\times$ to $3.16\times$, so much of the gap between the libraries is really a
 gap between configurations. Applied to a synthetic healthcare score over 1000
-records, the encrypted computation finishes in 214\,ms and matches the plaintext
-answer to five significant figures.
+records, the encrypted computation finishes in 214\,ms, matches the plaintext answer
+to five significant figures, and costs $2{,}865\times$ plaintext rather than the
+$13{,}450\times$ measured on isolated operations --- because a full ciphertext
+amortises a cost that CKKS charges per ciphertext, not per value.
 \end{abstract}
 
 \vspace{0.2cm}
@@ -94,12 +93,12 @@ compared to equivalent plaintext computation?}
 
 The report follows the measurements in the order they led to one another.
 Section~\ref{sec:background} explains the scheme and the libraries,
-Section~\ref{sec:impl} what we built, and Section~\ref{sec:setup} how we measured
-it. Section~\ref{sec:results} gives the core result: what each operation costs. That
-result raises two questions --- does the cost look different on realistic input
-sizes, and are we measuring the libraries or the settings we gave them? ---
-which Sections~\ref{sec:scaling} and~\ref{sec:params} answer in turn.
-Section~\ref{sec:usecase} puts everything together in a healthcare example, and
+Section~\ref{sec:impl} what we built and the three experiments we ran, and
+Section~\ref{sec:setup} how we measured them. Section~\ref{sec:results} gives the
+core result: what each operation costs. That result raises an immediate question ---
+are we measuring the libraries, or the settings we gave them? ---
+which Section~\ref{sec:params} answers. Section~\ref{sec:usecase} then puts
+everything together in a healthcare example, and
 Sections~\ref{sec:usability}--\ref{sec:limits} cover usability and limitations.
 
 % ---------------------------------------------------------------------------
@@ -201,9 +200,35 @@ any length. Every input has to be padded up to the next power of two. For simple
 operations that is harmless, but Section~\ref{sec:usecase} shows a case where the
 padding \emph{value} has to be chosen carefully.
 
-Beyond the required operations we added three extensions: the encrypted dot product
-above, a sweep over input sizes (Section~\ref{sec:scaling}), and a re-run of OpenFHE
-under TenSEAL's parameters (Section~\ref{sec:params}).
+Each operation is timed on freshly encrypted inputs rather than on the output of the
+previous repetition, so no measurement inherits accumulated noise or a consumed
+level. All three implementations share one measurement harness, so the plaintext,
+TenSEAL and OpenFHE columns are produced by the same timing and memory code and
+differ only in the operation being called.
+
+\subsection{The three experiments}
+
+The measurements are organised as three experiments. The first answers the research
+question directly; the two after it exist because the one before left something
+unexplained.
+
+\begin{table}[H]\centering\small
+\begin{tabular}{@{}llp{7.6cm}@{}}
+\toprule
+& \textbf{Experiment} & \textbf{Question it answers} \\
+\midrule
+1 & Basic operations (\S\ref{sec:results})    & What does each encrypted operation cost, against the same operation in plaintext? \\
+2 & Matched parameters (\S\ref{sec:params})   & Is the gap between the libraries, or between the settings they chose by default? \\
+3 & Healthcare use case (\S\ref{sec:usecase}) & What happens when the operations are combined into one complete workload? \\
+\bottomrule
+\end{tabular}
+\caption{The three experiments and what each one is for.}
+\end{table}
+
+Experiment 2 is one of the optional extensions named in the proposal, different
+parameter settings. Experiment 3 is the healthcare use case, implemented rather than
+only discussed. The encrypted dot product, also optional in the proposal, is measured
+as part of Experiment 1.
 
 % ---------------------------------------------------------------------------
 \section{Experimental Setup}\label{sec:setup}
@@ -322,7 +347,7 @@ from additions and constant multiplications will be far cheaper than one that ha
 aggregate across slots.
 
 \textbf{TenSEAL is faster here, on every operation.} It leads by $2.75\times$ on
-encryption and $6.89\times$ on multiplication. Section~\ref{sec:params} tests whether
+encryption and $6.85\times$ on multiplication. Section~\ref{sec:params} tests whether
 that reflects the libraries or the parameters we gave them.
 
 \subsection{Key generation}
@@ -409,53 +434,7 @@ larger scaling factor, $2^{50}$ against TenSEAL's $2^{40}$, which keeps about te
 more bits of every value. Section~\ref{sec:params} shows that is not the whole story.
 
 % ---------------------------------------------------------------------------
-\section{Extension: Larger Inputs}\label{sec:scaling}
-
-The operations above ran on five values. That is small enough to ask whether these
-overheads say anything about realistic workloads, so we repeated the full pipeline
---- encrypt, add, multiply, sum, average, decrypt --- at input sizes from 5 to 500.
-
-\begin{table}[H]\centering\footnotesize
-\setlength{\tabcolsep}{5pt}
-\begin{tabular}{@{}rrrrrr@{}}
-\toprule
-\textbf{Input size} & \textbf{Plaintext (ms)} & \textbf{TenSEAL (ms)} &
-\textbf{OpenFHE (ms)} & \textbf{TenSEAL ovh.} & \textbf{OpenFHE ovh.} \\
-\midrule
-5   & 0.001309 & 37.16  & 301.55 & $28{,}389\times$ & $230{,}368\times$ \\
-10  & 0.001683 & 51.13  & 347.45 & $30{,}383\times$ & $206{,}446\times$ \\
-50  & 0.004772 & 98.95  & 451.32 & $20{,}735\times$ & $94{,}576\times$ \\
-100 & 0.008711 & 119.99 & 501.16 & $13{,}774\times$ & $57{,}532\times$ \\
-500 & 0.044284 & 271.19 & 607.03 & $6{,}124\times$  & $13{,}708\times$ \\
-\bottomrule
-\end{tabular}
-\caption{End-to-end pipeline time by input size. Key generation runs once per size
-and is excluded.}
-\end{table}
-
-\chart{../figures/chart_scaling.png}{Pipeline time against input size. Left: the two
-encrypted libraries. Right: all three on a logarithmic scale.}
-
-Across a hundredfold increase in data, plaintext time grows $33.8\times$ --- close to
-linear, as expected --- while TenSEAL grows $7.3\times$ and OpenFHE only
-$2.0\times$. The cost per element falls accordingly, from 7.43\,ms to 0.54\,ms for
-TenSEAL.
-
-This is slot packing at work. A CKKS operation costs what the ring dimension says it
-costs, no matter how many slots hold data, so processing 500 values costs little more
-than processing 5. What does grow is the number of rotations in the summation, which
-rises with $\log_2$ of the batch size.
-
-The practical reading is that \textbf{a half-empty ciphertext is wasted work}. At
-five values TenSEAL is paying for thousands of slots to compute on five numbers,
-which is why the overhead there is $28{,}389\times$ and at 500 values only
-$6{,}124\times$. Neither library is full even at 500. It also means an overhead
-figure quoted without the input size behind it says very little: for OpenFHE, this
-one table ranges from $230{,}368\times$ down to $13{,}708\times$ for the same
-pipeline.
-
-% ---------------------------------------------------------------------------
-\section{Extension: The Libraries, or the Parameters?}\label{sec:params}
+\section{The Libraries, or the Parameters?}\label{sec:params}
 
 Section~\ref{sec:runtime} found TenSEAL faster on every operation and
 Section~\ref{sec:accuracy} found OpenFHE more precise. Both comparisons share a
@@ -488,8 +467,8 @@ to TenSEAL.}
 Matching the parameters closes most of the gap. Multiplication drops from
 $6.89\times$ to $3.16\times$, encryption becomes almost identical at $1.20\times$,
 and across all six operations the geometric mean falls from $6.44\times$ to
-$3.05\times$. Separating the two changes, the ring dimension accounts for a factor of
-2.18 and the scaling technique for a further 1.64.
+$3.05\times$. Separating the two changes for multiplication, the ring dimension
+accounts for a factor of 2.18 and the scaling technique for a further 1.64.
 
 Two qualifications go with this result. Decryption is still $7.8\times$ slower even
 matched, so the gap narrows everywhere but closes nowhere. And pinning the ring
@@ -608,9 +587,9 @@ the encrypted cohort mean matches the plaintext value to five significant figure
 
 The overhead is worth comparing against Section~\ref{sec:results}: $2{,}865\times$
 here against $13{,}450\times$ for the isolated operations. Nothing got faster. The
-ciphertexts got fuller --- 1024 slots carrying real data instead of 5 --- which is
-the effect Section~\ref{sec:scaling} isolated, now visible in a complete workload.
-Measuring HE on toy inputs overstates its cost.
+ciphertexts got fuller --- 1024 slots carrying real data instead of 5 --- and a CKKS
+operation costs what the ring dimension says it costs, however many slots actually
+hold data. Measuring HE on toy inputs therefore overstates its cost.
 
 The same effect shows up in data volume. Each encrypted feature is about 1\,MB, so
 the hospital uploads roughly 5\,MB for a cohort that takes 40\,KB in the clear --- an
@@ -707,22 +686,20 @@ Summation, average and dot product have to move data between slots, and every
 rotation carries a key switch. Structuring a computation to avoid aggregation across
 slots is the single most effective optimisation available.
 
-\item \textbf{Ciphertexts should be filled.} A hundredfold increase in input raised
-encrypted runtime by only $7.3\times$, because CKKS charges per ciphertext rather
-than per value. So measurements on small inputs mislead: the same pipeline showed
-$28{,}389\times$ overhead at five values and $6{,}124\times$ at five hundred.
-
 \item \textbf{Much of the difference between the libraries was a difference in
 parameters.} Re-running OpenFHE at TenSEAL's ring dimension and scale cut its
 multiplication penalty from $6.89\times$ to $3.16\times$ and made encryption nearly
 identical. Comparing two HE libraries at their defaults is partly a comparison of the
 defaults.
 
-\item \textbf{Real computations are cheaper than isolated operations suggest.} The
-healthcare scenario --- 1000 records, interaction terms, a cohort aggregate --- ran at
-$2{,}865\times$ plaintext, a fifth of the isolated benchmark's overhead, and agreed
-with the plaintext result to five significant figures. The largest data cost was not
-the ciphertexts but the evaluation keys: 179.7\,MB against 5\,MB of encrypted data.
+\item \textbf{Real computations are cheaper than isolated operations suggest, so
+ciphertexts should be filled.} The healthcare scenario --- 1000 records, interaction
+terms, a cohort aggregate --- ran at $2{,}865\times$ plaintext, a fifth of the
+isolated benchmark's overhead, and agreed with the plaintext result to five
+significant figures. Nothing became faster; the ciphertexts simply carried 1024
+values instead of 5, and CKKS charges per ciphertext rather than per value. The
+largest data cost was not the ciphertexts but the evaluation keys: 179.7\,MB against
+5\,MB of encrypted data.
 \end{enumerate}
 
 Homomorphic encryption is usable today for the kind of computation examined here, as
@@ -730,8 +707,10 @@ long as the workload is batched, structured to avoid unnecessary rotations, and 
 parameters chosen deliberately rather than by default. The cost is real, but it is
 dominated by choices the programmer controls.
 
-A further experiment beyond the scope of the proposal, measuring the cost of
-OpenFHE's noise-flooding decryption mode, is included in the project repository.
+Two further experiments are included in the project repository rather than here: a
+sweep of the pipeline over input sizes from 5 to 500, which measures the filling
+effect above directly, and a measurement of the cost of OpenFHE's noise-flooding
+decryption mode.
 
 % ---------------------------------------------------------------------------
 \begin{thebibliography}{9}\small
