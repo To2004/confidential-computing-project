@@ -10,19 +10,18 @@ Usage: python matched_comparison.py [--repeats 200]
 
 import argparse
 import json
-import warnings
 
-warnings.filterwarnings("ignore")
+# Imported before openfhe on purpose: benchmark_harness installs the filter that
+# silences the banner the OpenFHE wheel prints at import time.
+import benchmark_harness as harness
+import project_paths
 
 import openfhe as fhe
 import tenseal as ts
 from openfhe import (CCParamsCKKSRNS, GenCryptoContext, PKESchemeFeature,
                      SecurityLevel)
 
-import benchmark_harness as harness
-import project_paths
-
-VECTOR = [1.0, 2.0, 3.0, 4.0, 5.0]
+VECTOR = harness.DEFAULT_VECTOR
 
 # TenSEAL's configuration, which OpenFHE is being matched to.
 POLY_MODULUS_DEGREE = 8192
@@ -167,6 +166,46 @@ def probe_library_chosen_ring(scale_bits=SCALE_BITS, first_mod_bits=FIRST_MOD_BI
     return findings
 
 
+def print_summary(arms):
+    reference = arms["tenseal"]
+    ref_mul = reference["mul_time_stats"]["mean_ms"]
+    ref_err = reference["mul_max_error"]
+
+    print()
+    print("=" * 100)
+    print(f"{'Multiplication: time and precision across arms':^100}")
+    print("=" * 100)
+    print(f"{'Arm':<44}{'Ring':>7}{'Scale':>7}{'Mul (ms)':>11}"
+          f"{'vs TenSEAL':>12}{'Mul error':>12}{'vs TenSEAL':>10}")
+    print("-" * 100)
+    for key, res in arms.items():
+        mul = res["mul_time_stats"]["mean_ms"]
+        err = res["mul_max_error"]
+        name = res["arm"][:43]
+        print(f"{name:<44}{res['ring_dimension']:>7}"
+              f"{res['scale_bits']:>7}{mul:>11.3f}"
+              f"{mul / ref_mul:>11.2f}x{err:>12.2e}"
+              f"{ref_err / err:>9.0f}x")
+    print("-" * 100)
+    print("'vs TenSEAL' on error is how many times MORE precise than TenSEAL "
+          "(higher = better).")
+
+    print()
+    print("=" * 100)
+    print(f"{'All operations, mean ms':^100}")
+    print("=" * 100)
+    header = f"{'Arm':<44}" + "".join(f"{n:>9}" for n, _ in OPS)
+    print(header)
+    print("-" * 100)
+    for key, res in arms.items():
+        row = f"{res['arm'][:43]:<44}"
+        for _, op_key in OPS:
+            st = res.get(f"{op_key}_time_stats")
+            row += f"{st['mean_ms']:>9.2f}" if st else f"{'—':>9}"
+        print(row)
+    print("-" * 100)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="OpenFHE at TenSEAL's parameters: what survives matching?")
@@ -230,46 +269,6 @@ def main():
     with open(args.output, "w") as handle:
         json.dump(output, handle, indent=2)
     print(f"\nResults saved to {args.output}")
-
-
-def print_summary(arms):
-    reference = arms["tenseal"]
-    ref_mul = reference["mul_time_stats"]["mean_ms"]
-    ref_err = reference["mul_max_error"]
-
-    print()
-    print("=" * 100)
-    print(f"{'Multiplication: time and precision across arms':^100}")
-    print("=" * 100)
-    print(f"{'Arm':<44}{'Ring':>7}{'Scale':>7}{'Mul (ms)':>11}"
-          f"{'vs TenSEAL':>12}{'Mul error':>12}{'vs TenSEAL':>10}")
-    print("-" * 100)
-    for key, res in arms.items():
-        mul = res["mul_time_stats"]["mean_ms"]
-        err = res["mul_max_error"]
-        name = res["arm"][:43]
-        print(f"{name:<44}{res['ring_dimension']:>7}"
-              f"{res['scale_bits']:>7}{mul:>11.3f}"
-              f"{mul / ref_mul:>11.2f}x{err:>12.2e}"
-              f"{ref_err / err:>9.0f}x")
-    print("-" * 100)
-    print("'vs TenSEAL' on error is how many times MORE precise than TenSEAL "
-          "(higher = better).")
-
-    print()
-    print("=" * 100)
-    print(f"{'All operations, mean ms':^100}")
-    print("=" * 100)
-    header = f"{'Arm':<44}" + "".join(f"{n:>9}" for n, _ in OPS)
-    print(header)
-    print("-" * 100)
-    for key, res in arms.items():
-        row = f"{res['arm'][:43]:<44}"
-        for _, op_key in OPS:
-            st = res.get(f"{op_key}_time_stats")
-            row += f"{st['mean_ms']:>9.2f}" if st else f"{'—':>9}"
-        print(row)
-    print("-" * 100)
 
 
 if __name__ == "__main__":

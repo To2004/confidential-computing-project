@@ -7,9 +7,7 @@ Usage: python run_comparison.py [--repeats 1000] [--warmup 50]
 
 import argparse
 import json
-import warnings
 
-warnings.filterwarnings("ignore")
 
 import benchmark_harness as harness
 import project_paths
@@ -24,7 +22,7 @@ except (ImportError, ModuleNotFoundError) as exc:
     OPENFHE_AVAILABLE = False
     OPENFHE_ERROR = str(exc)
 
-DATA = [1.0, 2.0, 3.0, 4.0, 5.0]
+DATA = harness.DEFAULT_VECTOR
 
 HE_OPS = [
     ("Encrypt", "encrypt"),
@@ -45,7 +43,8 @@ COMPARABLE_OPS = [
     ("Dot Product", "dot"),
 ]
 
-W = 92
+# Width of the printed comparison tables.
+TABLE_WIDTH = 92
 
 
 def mean_ms(results, key):
@@ -56,12 +55,12 @@ def mean_ms(results, key):
 def print_timing_table(pt, ts, fhe):
     fhe_header = "OpenFHE" if fhe else "OpenFHE (N/A)"
     print()
-    print("=" * W)
-    print(f"{'Mean Time per Operation (ms)':^{W}}")
-    print("=" * W)
+    print("=" * TABLE_WIDTH)
+    print(f"{'Mean Time per Operation (ms)':^{TABLE_WIDTH}}")
+    print("=" * TABLE_WIDTH)
     print(f"{'Operation':<14}{'Plaintext':>14}{'TenSEAL':>14}{fhe_header:>16}"
           f"{'TS overhead':>16}{'FHE overhead':>16}")
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
 
     for name, key in HE_OPS:
         p = mean_ms(pt, key)
@@ -75,7 +74,7 @@ def print_timing_table(pt, ts, fhe):
         f_o = f"{f / p:>15,.0f}x" if (p and f) else f"{'—':>16}"
         print(f"{name:<14}{p_s}{t_s}{f_s}{t_o}{f_o}")
 
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
     # Two totals: the comparable total sums the same five ops on both sides (a
     # valid ratio); the session total adds encrypt/decrypt, which plaintext lacks.
     pt_total = sum(mean_ms(pt, k) for _, k in COMPARABLE_OPS)
@@ -99,12 +98,12 @@ def print_timing_table(pt, ts, fhe):
 def print_dispersion_table(ts, fhe):
     """Print relative SD and 95% CI half-width for each mean."""
     print()
-    print("=" * W)
-    print(f"{'Measurement Stability (relative standard deviation of each mean)':^{W}}")
-    print("=" * W)
+    print("=" * TABLE_WIDTH)
+    print(f"{'Measurement Stability (relative standard deviation of each mean)':^{TABLE_WIDTH}}")
+    print("=" * TABLE_WIDTH)
     print(f"{'Operation':<14}{'TenSEAL mean':>15}{'TS rel. SD':>13}{'TS 95% CI ±':>14}"
           f"{'OpenFHE mean':>15}{'FHE rel. SD':>13}{'FHE 95% CI ±':>14}")
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
     for name, key in HE_OPS:
         ts_st = ts[f"{key}_time_stats"]
         row = (f"{name:<14}{ts_st['mean_ms']:>15.4f}{ts_st['rel_std_pct']:>12.1f}%"
@@ -114,23 +113,23 @@ def print_dispersion_table(ts, fhe):
             row += (f"{f_st['mean_ms']:>15.4f}{f_st['rel_std_pct']:>12.1f}%"
                     f"{f_st['ci95_half_width_ms']:>14.4f}")
         print(row)
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
 
 
 def print_memory_table(pt, ts, fhe):
     fhe_header = "OpenFHE" if fhe else "OpenFHE (N/A)"
     print()
-    print("=" * W)
-    print(f"{'Peak Python-side Memory per Operation (KB)':^{W}}")
-    print("=" * W)
+    print("=" * TABLE_WIDTH)
+    print(f"{'Peak Python-side Memory per Operation (KB)':^{TABLE_WIDTH}}")
+    print("=" * TABLE_WIDTH)
     print(f"{'Operation':<16}{'Plaintext':>14}{'TenSEAL':>14}{fhe_header:>16}")
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
     for name, key in HE_OPS:
         p = pt.get(f"{key}_mem_kb")
         p_s = f"{p:>14.4f}" if p is not None else f"{'—':>14}"
         f_s = f"{fhe[f'{key}_mem_kb']:>16.2f}" if fhe else f"{'unavailable':>16}"
         print(f"{name:<16}{p_s}{ts[f'{key}_mem_kb']:>14.2f}{f_s}")
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
     print("tracemalloc sees Python allocations only; both libraries hold ciphertexts")
     print("in native heaps, so these are lower bounds on true memory use.")
 
@@ -149,18 +148,18 @@ def benchmark_key_generation(repeats, warmup):
 
 def print_keygen_table(keygen):
     print()
-    print("=" * W)
-    print(f"{'Context + Key Generation (one-off setup cost)':^{W}}")
-    print("=" * W)
+    print("=" * TABLE_WIDTH)
+    print(f"{'Context + Key Generation (one-off setup cost)':^{TABLE_WIDTH}}")
+    print("=" * TABLE_WIDTH)
     print(f"{'Library':<16}{'Mean (ms)':>14}{'SD (ms)':>12}{'95% CI ±':>12}{'Median':>12}")
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
     for label, key in [("TenSEAL", "tenseal"), ("OpenFHE", "openfhe")]:
         st = keygen.get(key)
         if st is None:
             continue
         print(f"{label:<16}{st['mean_ms']:>14.3f}{st['std_ms']:>12.3f}"
               f"{st['ci95_half_width_ms']:>12.3f}{st['median_ms']:>12.3f}")
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
     print(f"{keygen['repeats']} repetitions. Includes crypto context construction, secret/public")
     print("key generation, and the evaluation keys each library needs (relinearization,")
     print("Galois/rotation keys for TenSEAL; multiplication and summation keys for OpenFHE).")
@@ -169,11 +168,11 @@ def print_keygen_table(keygen):
 def print_error_table(ts, fhe):
     fhe_header = "OpenFHE" if fhe else "OpenFHE (N/A)"
     print()
-    print("=" * W)
-    print(f"{'Approximation Error (max absolute error)':^{W}}")
-    print("=" * W)
+    print("=" * TABLE_WIDTH)
+    print(f"{'Approximation Error (max absolute error)':^{TABLE_WIDTH}}")
+    print("=" * TABLE_WIDTH)
     print(f"{'Operation':<16}{'TenSEAL':>22}{fhe_header:>22}")
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
     for name, key in [
         ("Add", "add_max_error"),
         ("Multiply", "mul_max_error"),
@@ -183,7 +182,7 @@ def print_error_table(ts, fhe):
     ]:
         f_s = f"{fhe[key]:>22.4e}" if fhe else f"{'unavailable':>22}"
         print(f"{name:<16}{ts[key]:>22.4e}{f_s}")
-    print("-" * W)
+    print("-" * TABLE_WIDTH)
 
 
 def main():

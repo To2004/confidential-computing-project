@@ -20,17 +20,17 @@ Usage: python ind_cpad_flooding.py [--repeats 200]
 
 import argparse
 import json
-import warnings
-
-warnings.filterwarnings("ignore")
 
 import numpy as np
-import openfhe as fhe
-from openfhe import CCParamsCKKSRNS, GenCryptoContext, PKESchemeFeature
 
+# Imported before openfhe on purpose: benchmark_harness installs the filter that
+# silences the banner the OpenFHE wheel prints at import time.
 import benchmark_harness as harness
 import project_paths
 import synthetic_patients as patients
+
+import openfhe as fhe
+from openfhe import CCParamsCKKSRNS, GenCryptoContext, PKESchemeFeature
 
 # Small cohort: this experiment is about the security/performance trade-off, and
 # a smaller batch keeps the two-pass protocol quick to run.
@@ -206,78 +206,6 @@ def measure_arm(cohort, batch_size, n_patients, reference_scores,
     return results
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Cost of the IND-CPA^D noise-flooding mitigation in CKKS")
-    parser.add_argument("--patients", type=int, default=DEFAULT_PATIENTS)
-    parser.add_argument("--seed", type=int, default=patients.DEFAULT_SEED)
-    parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
-    parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
-    parser.add_argument("--output",
-                        default=project_paths.result_path("ind_cpad_results.json"),
-                        help="where to write the JSON results")
-    args = parser.parse_args()
-
-    import risk_score_benchmark as rsb
-
-    batch_size = rsb.next_power_of_two(args.patients)
-    cohort = patients.generate_cohort(args.patients, seed=args.seed)
-    reference_scores = patients.plaintext_risk_scores(cohort)
-
-
-    print("=" * 96)
-    print(f"{'IND-CPA^D: the cost of noise flooding in CKKS':^96}")
-    print("=" * 96)
-    print("Li & Micciancio, EUROCRYPT 2021: CKKS is not IND-CPA^D secure. An")
-    print("adversary who sees approximate DECRYPTION RESULTS can recover the secret")
-    print("key. Our scenario publishes a decrypted cohort statistic, so it is")
-    print("exactly the setting the attack applies to.")
-    print()
-    print(f"Workload: the risk-score circuit over {args.patients} patients "
-          f"(batch {batch_size}), depth {MULT_DEPTH}.")
-    print(f"Timing: {args.repeats} repetitions, {args.warmup} warm-up calls "
-          f"discarded.\n")
-
-    print("Pass 1 — EXEC_NOISE_ESTIMATION (measure the circuit's own noise):")
-    noise_estimate, est_ring, est_stats = estimate_noise(cohort, batch_size, args.patients)
-    print(f"  GetLogError() = {noise_estimate:.4f}  "
-          f"(log2 of the circuit's error; ring dimension {est_ring})\n")
-
-    print("Baseline arm — FIXED_NOISE_DECRYPT (what every other experiment used):")
-    baseline = measure_arm(cohort, batch_size, args.patients, reference_scores,
-                           args.repeats, args.warmup, label="baseline")
-
-    print("\nMitigated arm — NOISE_FLOODING_DECRYPT with that estimate:")
-    flooded = measure_arm(cohort, batch_size, args.patients, reference_scores,
-                          args.repeats, args.warmup,
-                          noise_estimate=noise_estimate, label="flooded")
-
-    print("\nReference point — TenSEAL, which has no decryption-noise setting:")
-    tenseal_spread = tenseal_decryption_spread()
-    print(f"  randomized = {tenseal_spread['is_randomized']}, "
-          f"max spread = {tenseal_spread['max_range_across_slots']:.4e}")
-
-    print_summary(baseline, flooded, noise_estimate, tenseal_spread)
-
-    output = {
-        "n_patients": args.patients,
-        "batch_size": batch_size,
-        "repeats": args.repeats,
-        "warmup": args.warmup,
-        "noise_estimate_log2": noise_estimate,
-        "estimation_pass_time_stats": est_stats,
-        "multiplicative_depth": MULT_DEPTH,
-        "reference": "Li & Micciancio, EUROCRYPT 2021",
-        "environment": harness.environment_info(),
-        "baseline": baseline,
-        "flooded": flooded,
-        "tenseal_decryption_spread": tenseal_spread,
-    }
-    with open(args.output, "w") as handle:
-        json.dump(output, handle, indent=2)
-    print(f"\nResults saved to {args.output}")
-
-
 def print_summary(baseline, flooded, noise_estimate, tenseal_spread):
     print()
     print("=" * 96)
@@ -336,6 +264,75 @@ def print_summary(baseline, flooded, noise_estimate, tenseal_spread):
     print(f"Noise estimate fed to pass 2: 2^{noise_estimate:.2f}")
     print("The mitigation also costs an entire extra pass over the circuit, since")
     print("the noise estimate must be measured before it can be flooded.")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Cost of the IND-CPA^D noise-flooding mitigation in CKKS")
+    parser.add_argument("--patients", type=int, default=DEFAULT_PATIENTS)
+    parser.add_argument("--seed", type=int, default=patients.DEFAULT_SEED)
+    parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
+    parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
+    parser.add_argument("--output",
+                        default=project_paths.result_path("ind_cpad_results.json"),
+                        help="where to write the JSON results")
+    args = parser.parse_args()
+
+    batch_size = harness.next_power_of_two(args.patients)
+    cohort = patients.generate_cohort(args.patients, seed=args.seed)
+    reference_scores = patients.plaintext_risk_scores(cohort)
+
+    print("=" * 96)
+    print(f"{'IND-CPA^D: the cost of noise flooding in CKKS':^96}")
+    print("=" * 96)
+    print("Li & Micciancio, EUROCRYPT 2021: CKKS is not IND-CPA^D secure. An")
+    print("adversary who sees approximate DECRYPTION RESULTS can recover the secret")
+    print("key. Our scenario publishes a decrypted cohort statistic, so it is")
+    print("exactly the setting the attack applies to.")
+    print()
+    print(f"Workload: the risk-score circuit over {args.patients} patients "
+          f"(batch {batch_size}), depth {MULT_DEPTH}.")
+    print(f"Timing: {args.repeats} repetitions, {args.warmup} warm-up calls "
+          f"discarded.\n")
+
+    print("Pass 1 — EXEC_NOISE_ESTIMATION (measure the circuit's own noise):")
+    noise_estimate, est_ring, est_stats = estimate_noise(cohort, batch_size, args.patients)
+    print(f"  GetLogError() = {noise_estimate:.4f}  "
+          f"(log2 of the circuit's error; ring dimension {est_ring})\n")
+
+    print("Baseline arm — FIXED_NOISE_DECRYPT (what every other experiment used):")
+    baseline = measure_arm(cohort, batch_size, args.patients, reference_scores,
+                           args.repeats, args.warmup, label="baseline")
+
+    print("\nMitigated arm — NOISE_FLOODING_DECRYPT with that estimate:")
+    flooded = measure_arm(cohort, batch_size, args.patients, reference_scores,
+                          args.repeats, args.warmup,
+                          noise_estimate=noise_estimate, label="flooded")
+
+    print("\nReference point — TenSEAL, which has no decryption-noise setting:")
+    tenseal_spread = tenseal_decryption_spread()
+    print(f"  randomized = {tenseal_spread['is_randomized']}, "
+          f"max spread = {tenseal_spread['max_range_across_slots']:.4e}")
+
+    print_summary(baseline, flooded, noise_estimate, tenseal_spread)
+
+    output = {
+        "n_patients": args.patients,
+        "batch_size": batch_size,
+        "repeats": args.repeats,
+        "warmup": args.warmup,
+        "noise_estimate_log2": noise_estimate,
+        "estimation_pass_time_stats": est_stats,
+        "multiplicative_depth": MULT_DEPTH,
+        "reference": "Li & Micciancio, EUROCRYPT 2021",
+        "environment": harness.environment_info(),
+        "baseline": baseline,
+        "flooded": flooded,
+        "tenseal_decryption_spread": tenseal_spread,
+    }
+    with open(args.output, "w") as handle:
+        json.dump(output, handle, indent=2)
+    print(f"\nResults saved to {args.output}")
 
 
 if __name__ == "__main__":

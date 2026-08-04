@@ -7,9 +7,7 @@ Usage:   python tenseal_benchmark.py [--repeats 1000] [--warmup 50]
 """
 
 import argparse
-import warnings
 
-warnings.filterwarnings("ignore")
 
 import tenseal as ts
 
@@ -122,13 +120,16 @@ def print_results(results):
     print(f"Dot  error      : {results['dot_error']:.2e}")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="TenSEAL CKKS benchmark")
     harness.add_repeat_arguments(parser)
     args = parser.parse_args()
 
-    DATA = [1.0, 2.0, 3.0, 4.0, 5.0]
-    print(f"Input vector: {DATA}\n")
-    res = run_benchmark(DATA, repeats=args.repeats, warmup=args.warmup,
-                        memory_repeats=args.memory_repeats)
-    print_results(res)
+    print(f"Input vector: {harness.DEFAULT_VECTOR}\n")
+    results = run_benchmark(harness.DEFAULT_VECTOR, repeats=args.repeats,
+                            warmup=args.warmup, memory_repeats=args.memory_repeats)
+    print_results(results)
+
+
+if __name__ == "__main__":
+    main()

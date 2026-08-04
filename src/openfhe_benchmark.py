@@ -6,12 +6,12 @@ Usage:   python openfhe_benchmark.py [--repeats 1000] [--warmup 50]
 """
 
 import argparse
-import warnings
-
-warnings.filterwarnings("ignore")
-
 import os
 import tempfile
+
+# Imported before openfhe on purpose: benchmark_harness installs the filter that
+# silences the banner the OpenFHE wheel prints at import time.
+import benchmark_harness as harness
 
 from openfhe import (
     BINARY,
@@ -21,8 +21,6 @@ from openfhe import (
     PKESchemeFeature,
     SerializeToFile,
 )
-
-import benchmark_harness as harness
 
 OP_NAMES = [
     ("Encrypt", "encrypt"),
@@ -44,18 +42,11 @@ ACCURACY_LIMITS = {
 }
 
 
-def _next_power_of_two(n: int) -> int:
-    p = 1
-    while p < n:
-        p <<= 1
-    return p
-
-
-def make_context(batch_size: int):
+def make_context(batch_size):
     params = CCParamsCKKSRNS()
     params.SetMultiplicativeDepth(3)
     params.SetScalingModSize(50)
-    params.SetBatchSize(_next_power_of_two(batch_size))
+    params.SetBatchSize(harness.next_power_of_two(batch_size))
     # Ring dimension is derived from this plus the depth and scaling size.
     params.SetSecurityLevel(HEStd_128_classic)
 
@@ -163,13 +154,16 @@ def print_results(results):
     print(f"Dot  error      : {results['dot_error']:.2e}")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="OpenFHE CKKS benchmark")
     harness.add_repeat_arguments(parser)
     args = parser.parse_args()
 
-    DATA = [1.0, 2.0, 3.0, 4.0, 5.0]
-    print(f"Input vector: {DATA}\n")
-    res = run_benchmark(DATA, repeats=args.repeats, warmup=args.warmup,
-                        memory_repeats=args.memory_repeats)
-    print_results(res)
+    print(f"Input vector: {harness.DEFAULT_VECTOR}\n")
+    results = run_benchmark(harness.DEFAULT_VECTOR, repeats=args.repeats,
+                            warmup=args.warmup, memory_repeats=args.memory_repeats)
+    print_results(results)
+
+
+if __name__ == "__main__":
+    main()

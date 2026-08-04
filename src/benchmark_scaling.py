@@ -8,9 +8,6 @@ Usage: python benchmark_scaling.py [--repeats 1000] [--warmup 20]
 
 import argparse
 import json
-import warnings
-
-warnings.filterwarnings("ignore")
 
 import tenseal as ts
 
@@ -27,13 +24,6 @@ SIZES = [5, 10, 50, 100, 500]
 
 # Shorter warm-up than the primitive benchmark: a full pipeline call is much slower.
 DEFAULT_SCALING_WARMUP = 20
-
-
-def _next_power_of_two(n: int) -> int:
-    p = 1
-    while p < n:
-        p <<= 1
-    return p
 
 
 # ── TenSEAL ──────────────────────────────────────────────────────────────────
@@ -70,7 +60,7 @@ def openfhe_pipeline(vector):
     params = CCParamsCKKSRNS()
     params.SetMultiplicativeDepth(3)
     params.SetScalingModSize(50)
-    params.SetBatchSize(_next_power_of_two(n))
+    params.SetBatchSize(harness.next_power_of_two(n))
     cc = GenCryptoContext(params)
     for feature in (PKESchemeFeature.PKE, PKESchemeFeature.KEYSWITCH,
                     PKESchemeFeature.LEVELEDSHE, PKESchemeFeature.ADVANCEDSHE):

@@ -14,6 +14,17 @@ import statistics
 import sys
 import time
 import tracemalloc
+import warnings
+
+# The OpenFHE wheel prints a build-support banner the first time it is imported.
+# It is not actionable here and would interleave with the benchmark tables.
+# Every script imports this module first, so silencing it once covers all of them.
+warnings.filterwarnings("ignore", message=".*Deprecation notice.*",
+                        category=UserWarning)
+
+# The input vector shared by the primitive-operation benchmarks, so the
+# plaintext, TenSEAL and OpenFHE columns are all measured on the same data.
+DEFAULT_VECTOR = [1.0, 2.0, 3.0, 4.0, 5.0]
 
 # Defaults used by every benchmark unless overridden on the command line.
 DEFAULT_REPEATS = 1000
@@ -337,6 +348,14 @@ def format_stats_table(results, op_names, title):
     lines.append(f"* marks |drift| > {DRIFT_WARN_PCT}%, meaning the samples are not "
                  f"steady state and the mean should not be trusted.")
     return "\n".join(lines)
+
+
+def next_power_of_two(n):
+    """Round `n` up to a power of two. OpenFHE requires power-of-two batch sizes."""
+    p = 1
+    while p < n:
+        p <<= 1
+    return p
 
 
 def add_repeat_arguments(parser):

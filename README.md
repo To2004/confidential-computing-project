@@ -142,8 +142,7 @@ tectonic final_report.tex && mv final_report.pdf ..
 ```
 
 Run it from `report/` so the `../figures/…` image paths resolve. Install the toolchain
-with `conda install -c conda-forge tectonic`. The report is plain LaTeX; it was
-previously Markdown converted through pandoc.
+with `conda install -c conda-forge tectonic`.
 
 ## Methodology
 
@@ -206,7 +205,7 @@ docstring.
 ├── run_all_benchmarks.sh     reproduce every experiment, then the charts
 ├── submit_benchmarks.sbatch  the same, on an exclusive SLURM node
 ├── src/                      benchmark and experiment code
-├── tests/                    unit tests (40, plain unittest)
+├── tests/                    unit tests (47, plain unittest)
 ├── results/                  benchmark output, JSON
 ├── figures/                  generated charts, PNG
 ├── report/                   final_report.tex (source) and the proposal
@@ -230,4 +229,4 @@ Start here:
 
 ## Authors
 
-Itai Zloclzower, Jacob Shemesh, Tomer Ovadia, Yoni Glickstein
+Itai Zloclzower, Jacob Shemesh, Tomer Ovadya, Yoni Glickstein

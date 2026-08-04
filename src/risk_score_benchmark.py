@@ -7,9 +7,7 @@ ciphertext, one CKKS slot per patient, on both TenSEAL and OpenFHE.
 
 import argparse
 import json
-import warnings
 
-warnings.filterwarnings("ignore")
 
 import numpy as np
 
@@ -35,14 +33,6 @@ CRYPTO_PARAMETERS = {
         "scaling_mod_size": 50,
     },
 }
-
-
-def next_power_of_two(n):
-    """Round up to a power of two; OpenFHE requires a power-of-two batch size."""
-    p = 1
-    while p < n:
-        p <<= 1
-    return p
 
 
 def pad_features(cohort, n_slots):
@@ -86,7 +76,7 @@ class TenSEALRiskScore:
 
         self.ts = ts
         self.n_patients = n_patients
-        self.n_slots = next_power_of_two(n_patients)
+        self.n_slots = harness.next_power_of_two(n_patients)
         self.padded = pad_features(cohort, self.n_slots)
         cfg = CRYPTO_PARAMETERS["tenseal"]
 
@@ -175,7 +165,7 @@ class OpenFHERiskScore:
         parameters.
         """
         self.n_patients = n_patients
-        self.n_slots = next_power_of_two(n_patients)
+        self.n_slots = harness.next_power_of_two(n_patients)
         self.padded = pad_features(cohort, self.n_slots)
 
         if context is not None:
@@ -378,6 +368,69 @@ def plaintext_pipeline_stats(cohort, repeats, warmup, memory_repeats):
     return results
 
 
+def print_summary(plaintext, measured, n_patients):
+    stages = [
+        ("Encrypt features", "encrypt_features"),
+        ("Score evaluation", "score_evaluation"),
+        ("Cohort mean", "cohort_mean"),
+        ("Decrypt scores", "decrypt_scores"),
+    ]
+    names = list(measured.keys())
+
+    print()
+    print("=" * 88)
+    print(f"{'Risk Score Pipeline — mean time per stage (ms)':^88}")
+    print("=" * 88)
+    header = f"{'Stage':<20}{'Plaintext':>14}" + "".join(f"{n.capitalize():>16}" for n in names)
+    print(header)
+    print("-" * 88)
+    for label, key in stages:
+        cells = f"{label:<20}"
+        pt_stats = plaintext.get(f"{key}_time_stats")
+        cells += f"{pt_stats['mean_ms']:>14.4f}" if pt_stats else f"{'—':>14}"
+        for n in names:
+            st = measured[n].get(f"{key}_time_stats")
+            cells += f"{st['mean_ms']:>16.3f}" if st else f"{'—':>16}"
+        print(cells)
+    print("-" * 88)
+
+    pt_total = plaintext["pipeline_total_ms"]
+    totals = f"{'Pipeline total':<20}{pt_total:>14.4f}"
+    for n in names:
+        totals += f"{measured[n]['pipeline_total_ms']:>16.3f}"
+    print(totals)
+
+    overhead = f"{'Overhead vs plain':<20}{'1x':>14}"
+    for n in names:
+        overhead += f"{measured[n]['pipeline_total_ms'] / pt_total:>15,.0f}x"
+    print(overhead)
+
+    per_patient = f"{'Per patient (ms)':<20}{pt_total / n_patients:>14.6f}"
+    for n in names:
+        per_patient += f"{measured[n]['pipeline_total_ms'] / n_patients:>16.4f}"
+    print(per_patient)
+
+    print()
+    print("=" * 88)
+    print(f"{'Risk Score Accuracy vs Plaintext Reference':^88}")
+    print("=" * 88)
+    print(f"{'Metric':<34}" + "".join(f"{n.capitalize():>18}" for n in names))
+    print("-" * 88)
+    for label, key, fmt in [
+        ("Max abs error (score points)", "score_max_abs_error", "{:>18.4e}"),
+        ("Mean abs error (score points)", "score_mean_abs_error", "{:>18.4e}"),
+        ("Max relative error", "score_max_rel_error", "{:>18.4e}"),
+        ("Cohort mean, encrypted", "cohort_mean_encrypted", "{:>18.6f}"),
+        ("Cohort mean, plaintext", "cohort_mean_plaintext", "{:>18.6f}"),
+        ("Cohort mean abs error", "cohort_mean_abs_error", "{:>18.4e}"),
+    ]:
+        row = f"{label:<34}"
+        for n in names:
+            row += fmt.format(measured[n][key])
+        print(row)
+    print("-" * 88)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     parser.add_argument("--patients", type=int, default=patients.DEFAULT_N_PATIENTS,
@@ -440,69 +493,6 @@ def main():
     with open(args.output, "w") as handle:
         json.dump(output, handle, indent=2)
     print(f"\nResults saved to {args.output}")
-
-
-def print_summary(plaintext, measured, n_patients):
-    stages = [
-        ("Encrypt features", "encrypt_features"),
-        ("Score evaluation", "score_evaluation"),
-        ("Cohort mean", "cohort_mean"),
-        ("Decrypt scores", "decrypt_scores"),
-    ]
-    names = list(measured.keys())
-
-    print()
-    print("=" * 88)
-    print(f"{'Risk Score Pipeline — mean time per stage (ms)':^88}")
-    print("=" * 88)
-    header = f"{'Stage':<20}{'Plaintext':>14}" + "".join(f"{n.capitalize():>16}" for n in names)
-    print(header)
-    print("-" * 88)
-    for label, key in stages:
-        cells = f"{label:<20}"
-        pt_stats = plaintext.get(f"{key}_time_stats")
-        cells += f"{pt_stats['mean_ms']:>14.4f}" if pt_stats else f"{'—':>14}"
-        for n in names:
-            st = measured[n].get(f"{key}_time_stats")
-            cells += f"{st['mean_ms']:>16.3f}" if st else f"{'—':>16}"
-        print(cells)
-    print("-" * 88)
-
-    pt_total = plaintext["pipeline_total_ms"]
-    totals = f"{'Pipeline total':<20}{pt_total:>14.4f}"
-    for n in names:
-        totals += f"{measured[n]['pipeline_total_ms']:>16.3f}"
-    print(totals)
-
-    overhead = f"{'Overhead vs plain':<20}{'1x':>14}"
-    for n in names:
-        overhead += f"{measured[n]['pipeline_total_ms'] / pt_total:>15,.0f}x"
-    print(overhead)
-
-    per_patient = f"{'Per patient (ms)':<20}{pt_total / n_patients:>14.6f}"
-    for n in names:
-        per_patient += f"{measured[n]['pipeline_total_ms'] / n_patients:>16.4f}"
-    print(per_patient)
-
-    print()
-    print("=" * 88)
-    print(f"{'Risk Score Accuracy vs Plaintext Reference':^88}")
-    print("=" * 88)
-    print(f"{'Metric':<34}" + "".join(f"{n.capitalize():>18}" for n in names))
-    print("-" * 88)
-    for label, key, fmt in [
-        ("Max abs error (score points)", "score_max_abs_error", "{:>18.4e}"),
-        ("Mean abs error (score points)", "score_mean_abs_error", "{:>18.4e}"),
-        ("Max relative error", "score_max_rel_error", "{:>18.4e}"),
-        ("Cohort mean, encrypted", "cohort_mean_encrypted", "{:>18.6f}"),
-        ("Cohort mean, plaintext", "cohort_mean_plaintext", "{:>18.6f}"),
-        ("Cohort mean abs error", "cohort_mean_abs_error", "{:>18.4e}"),
-    ]:
-        row = f"{label:<34}"
-        for n in names:
-            row += fmt.format(measured[n][key])
-        print(row)
-    print("-" * 88)
 
 
 if __name__ == "__main__":

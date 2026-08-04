@@ -7,9 +7,7 @@ Saves:  figures/chart_*.png
 
 import json
 import os
-import warnings
 
-warnings.filterwarnings("ignore")
 
 import matplotlib
 
