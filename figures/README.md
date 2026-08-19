@@ -12,10 +12,8 @@ python src/plot_results.py
 | `chart_operations.png` | Mean time per operation, and slowdown versus plaintext |
 | `chart_memory.png` | What `tracemalloc` sees beside what a ciphertext actually costs |
 | `chart_errors.png` | CKKS approximation error per operation |
-| `chart_scaling.png` | Pipeline time versus vector size |
 | `chart_risk_score.png` | Risk-score stage costs, cohort distribution, accuracy |
 | `chart_matched_comparison.png` | OpenFHE at TenSEAL's parameters: speed and precision |
-| `chart_ind_cpad.png` | Cost of the IND-CPA^D defence, and which configurations randomize decryption |
 
 Bars and markers carry 95% confidence intervals. Series colours are a
 colourblind-safe categorical set, checked for deuteranopia, protanopia and

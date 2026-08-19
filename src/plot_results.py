@@ -295,66 +295,6 @@ def chart_errors(data):
     save_chart("chart_errors.png")
 
 
-# ── Chart 4: Scaling ─────────────────────────────────────────────────────────
-
-def chart_scaling(sc):
-    sizes = sc["sizes"]
-    pt_ms = sc["plaintext_ms"]
-    ts_ms = sc["tenseal_ms"]
-    fhe_ms = sc.get("openfhe_ms", [])
-    fhe_ok = sc.get("openfhe_available", False) and any(v is not None for v in fhe_ms)
-
-    def ci(stats_list):
-        if not stats_list or stats_list[0] is None:
-            return None
-        return [s["ci95_half_width_ms"] for s in stats_list]
-
-    ts_err = ci(sc.get("tenseal_stats"))
-    fhe_err = ci(sc.get("openfhe_stats"))
-    pt_err = ci(sc.get("plaintext_stats"))
-
-    fig, axes = plt.subplots(1, 2, figsize=(13.5, 5))
-
-    ax = axes[0]
-    ax.errorbar(sizes, ts_ms, yerr=ts_err, fmt="o-", color=C_TS, label="TenSEAL",
-                linewidth=2, markersize=7, capsize=3, ecolor=INK_SOFT, elinewidth=0.8)
-    if fhe_ok:
-        ax.errorbar(sizes, fhe_ms, yerr=fhe_err, fmt="s-", color=C_FHE, label="OpenFHE",
-                    linewidth=2, markersize=7, capsize=3, ecolor=INK_SOFT, elinewidth=0.8)
-    ax.set_xlabel("Vector size (elements)")
-    ax.set_ylabel("Mean pipeline time (ms)")
-    ax.set_title("Encrypted pipeline scaling")
-    ax.grid(True, alpha=0.6)
-    ax.set_axisbelow(True)
-    ax.legend()
-    # Label the last point of each series only.
-    for series, colour in [(ts_ms, C_TS)] + ([(fhe_ms, C_FHE)] if fhe_ok else []):
-        ax.annotate(f"{series[-1]:,.0f} ms", xy=(sizes[-1], series[-1]),
-                    xytext=(-6, 8), textcoords="offset points",
-                    ha="right", fontsize=8, color=INK_SOFT)
-
-    ax = axes[1]
-    ax.errorbar(sizes, pt_ms, yerr=pt_err, fmt="^-", color=C_PT, label="Plaintext",
-                linewidth=2, markersize=7, capsize=3, ecolor=INK_SOFT, elinewidth=0.8)
-    ax.errorbar(sizes, ts_ms, yerr=ts_err, fmt="o-", color=C_TS, label="TenSEAL",
-                linewidth=2, markersize=7, capsize=3, ecolor=INK_SOFT, elinewidth=0.8)
-    if fhe_ok:
-        ax.errorbar(sizes, fhe_ms, yerr=fhe_err, fmt="s-", color=C_FHE, label="OpenFHE",
-                    linewidth=2, markersize=7, capsize=3, ecolor=INK_SOFT, elinewidth=0.8)
-    ax.set_xlabel("Vector size (elements)")
-    ax.set_ylabel("Mean pipeline time (ms) — log scale")
-    ax.set_title("Plaintext vs encrypted")
-    ax.set_yscale("log")
-    ax.grid(True, which="major", alpha=0.6)
-    ax.set_axisbelow(True)
-    ax.legend()
-
-    fig.suptitle("Performance scaling with vector size", fontsize=12.5,
-                 fontweight="bold", color=INK)
-    fig.text(0.5, 0.005, repeat_note(sc), ha="center", fontsize=8, color=INK_SOFT)
-    plt.tight_layout(rect=(0, 0.03, 1, 0.95))
-    save_chart("chart_scaling.png")
-
 
 # ── Chart 5: Encrypted medical risk score ────────────────────────────────────
 
@@ -436,8 +376,7 @@ def chart_risk_score(rs):
                  "5 features, interaction and quadratic terms",
                  fontsize=12.5, fontweight="bold", color=INK)
     fig.text(0.5, 0.005,
-             "Synthetic score for demonstration only — not a validated clinical model.  "
-             + repeat_note(rs),
+             repeat_note(rs),
              ha="center", fontsize=8, color=INK_SOFT)
     plt.tight_layout(rect=(0, 0.035, 1, 0.94))
     save_chart("chart_risk_score.png")
@@ -506,81 +445,6 @@ def chart_matched(mc):
     save_chart("chart_matched_comparison.png")
 
 
-# ── Chart 7: IND-CPA^D noise flooding ────────────────────────────────────────
-
-def chart_ind_cpad(ic):
-    """Plot the timing cost of noise flooding and the decryption spread per library."""
-    ops = [("Encrypt", "encrypt"), ("Multiply", "mul"),
-           ("Sum", "sum"), ("Decrypt", "decrypt")]
-    base_ms = [ic["baseline"][f"{k}_time_stats"]["mean_ms"] for _, k in ops]
-    base_ci = [ic["baseline"][f"{k}_time_stats"]["ci95_half_width_ms"] for _, k in ops]
-    flood_ms = [ic["flooded"][f"{k}_time_stats"]["mean_ms"] for _, k in ops]
-    flood_ci = [ic["flooded"][f"{k}_time_stats"]["ci95_half_width_ms"] for _, k in ops]
-
-    fig, axes = plt.subplots(1, 2, figsize=(15, 5.4))
-
-    ax = axes[0]
-    x = np.arange(len(ops))
-    b1 = ax.bar(x - (BAR_W + GAP) / 2, base_ms, BAR_W, yerr=base_ci, capsize=2.5,
-                label="FIXED_NOISE_DECRYPT (default)", color=C_TS,
-                error_kw=dict(ecolor=INK_SOFT, lw=0.8))
-    b2 = ax.bar(x + (BAR_W + GAP) / 2, flood_ms, BAR_W, yerr=flood_ci, capsize=2.5,
-                label="NOISE_FLOODING_DECRYPT", color=C_FHE,
-                error_kw=dict(ecolor=INK_SOFT, lw=0.8))
-    label_bars(ax, b1, base_ms, fmt="{:.1f}", errs=base_ci)
-    label_bars(ax, b2, flood_ms, fmt="{:.1f}", errs=flood_ci)
-    ax.set_ylabel("Mean time (ms) — log scale")
-    ax.set_title("Flooding costs decryption, and only decryption")
-    ax.set_xticks(x)
-    ax.set_xticklabels([n for n, _ in ops])
-    ax.set_yscale("log")
-    ax.grid(True, axis="y", which="major", alpha=0.6)
-    ax.set_axisbelow(True)
-    ax.legend(loc="upper left", fontsize=8)
-    ratio = flood_ms[-1] / base_ms[-1]
-    ax.annotate(f"{ratio:.2f}×", xy=(x[-1] + (BAR_W + GAP) / 2, flood_ms[-1]),
-                xytext=(14, 6), textcoords="offset points", fontsize=10,
-                fontweight="bold", color=INK)
-
-    # Right panel: decryption spread. Zero cannot be drawn on a log axis, so a
-    # zero spread is drawn at an artificial floor.
-    ax = axes[1]
-    spreads = [
-        ("TenSEAL\n(no setting)", ic["tenseal_decryption_spread"]["max_range_across_slots"], C_TS),
-        ("OpenFHE\ndefault", ic["baseline"]["decryption_spread"]["max_range_across_slots"], C_FHE),
-        ("OpenFHE\nflooding", ic["flooded"]["decryption_spread"]["max_range_across_slots"], C_FHE),
-    ]
-    nonzero = [v for _, v, _ in spreads if v > 0]
-    floor = min(nonzero) / 100 if nonzero else 1e-16
-    heights = [v if v > 0 else floor for _, v, _ in spreads]
-    xs = np.arange(len(spreads))
-    ax.bar(xs, heights, 0.55, color=[c for _, _, c in spreads])
-    # Not label_bars: a floored bar must be labelled 0, not its drawn height.
-    for i, (_, value, _) in enumerate(spreads):
-        text = "0 — deterministic" if value == 0 else f"{value:.1e}"
-        ax.annotate(text, xy=(i, heights[i]), xytext=(0, 4),
-                    textcoords="offset points", ha="center", va="bottom",
-                    fontsize=8, color=INK_SOFT,
-                    fontweight="bold" if value == 0 else "normal")
-    ax.set_ylabel("Spread across repeated decryptions — log scale")
-    ax.set_title("Is the released value randomized?")
-    ax.set_xticks(xs)
-    ax.set_xticklabels([n for n, _, _ in spreads])
-    ax.set_yscale("log")
-    ax.set_ylim(floor / 3, max(heights) * 30)
-    ax.grid(True, axis="y", which="major", alpha=0.6)
-    ax.set_axisbelow(True)
-
-    fig.suptitle("IND-CPA$^D$: releasing decrypted values (Li & Micciancio, EUROCRYPT 2021)",
-                 fontsize=12.5, fontweight="bold", color=INK)
-    fig.text(0.5, 0.005,
-             "A deterministic decryption leaks the key-dependent error the attack exploits. "
-             "Randomization shows a defence is active — not that it is sufficient: OpenFHE's "
-             "noise estimate is average-case, which Guo et al. (USENIX Sec. 2024) attack.",
-             ha="center", fontsize=8, color=INK_SOFT)
-    plt.tight_layout(rect=(0, 0.05, 1, 0.94))
-    save_chart("chart_ind_cpad.png")
-
 
 def main():
     apply_style()
@@ -590,12 +454,9 @@ def main():
     chart_memory(data)
     chart_errors(data)
 
-    chart_scaling(load("scaling_results.json"))
-
     optional = [
         ("risk_score_results.json", chart_risk_score, "risk_score_benchmark.py"),
         ("matched_comparison_results.json", chart_matched, "matched_comparison.py"),
-        ("ind_cpad_results.json", chart_ind_cpad, "ind_cpad_flooding.py"),
     ]
     for path, drawer, producer in optional:
         payload = load(path, required=False)

@@ -6,10 +6,9 @@
 #SBATCH --output=slurm-he-confirm-%j.out
 #SBATCH --error=slurm-he-confirm-%j.out
 #
-# Re-run only the two experiments whose numbers changed with the review fixes:
+# Re-run only the experiment whose numbers changed with the review fixes:
 #   * risk_score_benchmark  -- the plaintext stages are now disjoint, so the
 #                              overhead denominator changed
-#   * ind_cpad_flooding     -- the noise-estimation pass is now timed
 #
 # Why this is NOT the exclusive job. `submit_benchmarks.sbatch` asks for a whole
 # node, which on this cluster queues indefinitely because the site scheduler
@@ -50,10 +49,6 @@ python -m unittest discover -s tests
 echo
 echo "=== Encrypted composite score (disjoint plaintext stages) ==="
 python src/risk_score_benchmark.py --repeats "${REPEATS}"
-
-echo
-echo "=== IND-CPA^D flooding (estimation pass now timed) ==="
-python src/ind_cpad_flooding.py --repeats 200
 
 echo
 echo "# Load end    : $(cut -d' ' -f1-3 /proc/loadavg)"

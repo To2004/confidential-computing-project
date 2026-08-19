@@ -6,10 +6,8 @@ runs one experiment, and shows its results.
 | Notebook | Experiment | In the report |
 |---|---|---|
 | `01_basic_operations.ipynb` | Cost of encrypt, add, multiply, sum, average, dot product, decrypt | Experiment 1 |
-| `02_input_size.ipynb` | Runtime at vector sizes 5 to 500 | no — repository only |
 | `03_matched_parameters.ipynb` | OpenFHE pinned to TenSEAL's parameters | Experiment 2 |
 | `04_healthcare_risk_score.ipynb` | Encrypted risk score over 1000 synthetic patients | Experiment 3 |
-| `05_noise_flooding.ipynb` | Cost of OpenFHE's noise-flooding decryption | no — beyond the proposal |
 
 Every notebook has the same four steps: install and load the project, check
 which libraries are available, run the experiment, show the results.
@@ -23,10 +21,10 @@ notebook is not already inside a checkout.
 
 ## Two things to know
 
-**OpenFHE needs Python 3.8.** Its wheel ships a `cpython-38` binary, so on a
-current Colab runtime it installs and then fails to import. Notebooks 01, 02 and
-04 detect this and run with the plaintext and TenSEAL columns only. Notebooks 03
-and 05 measure OpenFHE itself and cannot run without it.
+**OpenFHE may not import on a hosted runtime.** Its wheels are Linux builds tied
+to specific distributions, so on some Colab runtimes it installs and then fails to
+import. Notebooks 01, 02 and 04 detect this and run with the plaintext and TenSEAL
+columns only. Notebooks 03 and 05 measure OpenFHE itself and need it present.
 
 **The notebooks use fewer repetitions than the report.** Each has a `REPEATS`
 constant near the top, set low enough to finish in a few minutes. The report

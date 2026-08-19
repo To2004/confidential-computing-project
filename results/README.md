@@ -7,10 +7,8 @@ its own script.
 | File | Produced by | Contents |
 |---|---|---|
 | `results.json` | `run_comparison.py` | Primitive operations: plaintext vs TenSEAL vs OpenFHE, plus key generation |
-| `scaling_results.json` | `benchmark_scaling.py` | Pipeline time at vector sizes 5–500 |
 | `risk_score_results.json` | `risk_score_benchmark.py` | Encrypted synthetic risk score over 1000 patients |
 | `matched_comparison_results.json` | `matched_comparison.py` | OpenFHE pinned to TenSEAL's ring dimension and scaling factor |
-| `ind_cpad_results.json` | `ind_cpad_flooding.py` | Cost of the IND-CPA^D noise-flooding defence, and decryption-randomization measurements |
 
 ## Reading a timing entry
 

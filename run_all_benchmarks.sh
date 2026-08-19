@@ -3,7 +3,7 @@
 # Reproduce every benchmark in the project and regenerate all charts.
 #
 # Requires a Python environment with tenseal, openfhe, numpy and matplotlib
-# importable (see README.md — OpenFHE ships Python 3.8 Linux-only wheels).
+# importable (see README.md — OpenFHE ships Linux-only wheels).
 #
 # Override the repetition count for a quick smoke run:
 #   REPEATS=5 ./run_all_benchmarks.sh
@@ -38,29 +38,21 @@ if [ "${SKIP_TESTS}" != "1" ]; then
 fi
 
 echo
-echo "=== 1/6  Primitive operations (plaintext vs TenSEAL vs OpenFHE) ==="
+echo "=== 1/4  Primitive operations (plaintext vs TenSEAL vs OpenFHE) ==="
 "${PYTHON}" src/run_comparison.py --repeats "${REPEATS}"
 
 echo
-echo "=== 2/6  Scaling with vector size ==="
-"${PYTHON}" src/benchmark_scaling.py --repeats "${REPEATS}"
-
-echo
-echo "=== 3/6  Encrypted synthetic medical risk score ==="
+echo "=== 2/4  Encrypted synthetic medical risk score ==="
 "${PYTHON}" src/risk_score_benchmark.py --repeats "${REPEATS}"
 
-# The two experiments below run a full pipeline per repetition and exist to
-# isolate a single effect, so they use a lower default repetition count.
+# The matched-parameter run evaluates a full pipeline per repetition and exists
+# to isolate a single effect, so it uses a lower default repetition count.
 echo
-echo "=== 4/6  Matched-parameter comparison (OpenFHE at TenSEAL's parameters) ==="
+echo "=== 3/4  Matched-parameter comparison (OpenFHE at TenSEAL's parameters) ==="
 "${PYTHON}" src/matched_comparison.py --repeats "$(( REPEATS < 200 ? REPEATS : 200 ))"
 
 echo
-echo "=== 5/6  IND-CPA^D noise flooding cost ==="
-"${PYTHON}" src/ind_cpad_flooding.py --repeats "$(( REPEATS < 200 ? REPEATS : 200 ))"
-
-echo
-echo "=== 6/6  Charts ==="
+echo "=== 4/4  Charts ==="
 "${PYTHON}" src/plot_results.py
 
 echo

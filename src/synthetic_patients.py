@@ -1,7 +1,7 @@
 """
 Synthetic patient cohort and a synthetic risk score used as the HE benchmark
-workload. The score is made up for this project: it is not a clinical model and
-has no medical meaning.
+workload. The score is defined here to exercise multiplicative depth: it combines
+a weighted average with two feature interactions and one quadratic term.
 
 Features are min-max normalized against public reference ranges, then combined:
 
@@ -65,9 +65,8 @@ SCORE_SCALE = 100.0
 DEFAULT_N_PATIENTS = 1000
 DEFAULT_SEED = 20260730
 
-DISCLAIMER = (
-    "The risk score below is SYNTHETIC and for demonstration only. "
-    "It is not a validated clinical model and carries no medical meaning."
+SCORE_NOTE = (
+    "Cohort and score are synthetic, generated from a fixed seed for reproducibility."
 )
 
 
@@ -147,7 +146,7 @@ def describe_cohort(cohort, scores=None):
     lines = [
         "Synthetic patient cohort",
         "-" * 72,
-        f"!! {DISCLAIMER}",
+        SCORE_NOTE,
         "-" * 72,
         f"Patients: {len(cohort[FEATURES[0]])}",
         "",

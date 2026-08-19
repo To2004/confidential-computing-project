@@ -160,9 +160,8 @@ class OpenFHERiskScore:
     def __init__(self, cohort, n_patients, context=None):
         """Build the backend, optionally over a caller-supplied crypto context.
 
-        `context` is a `(crypto_context, key_pair)` pair, used by
-        `ind_cpad_flooding.py` to run this circuit under noise-flooding
-        parameters.
+        `context` is a `(crypto_context, key_pair)` pair, which lets a caller run
+        this circuit under its own CKKS parameters.
         """
         self.n_patients = n_patients
         self.n_slots = harness.next_power_of_two(n_patients)
@@ -453,7 +452,7 @@ def main():
     print("=" * 88)
     print(f"{'Encrypted Synthetic Medical Risk Score':^88}")
     print("=" * 88)
-    print(patients.DISCLAIMER)
+    print(patients.SCORE_NOTE)
     print()
 
     cohort = patients.generate_cohort(args.patients, seed=args.seed)
@@ -491,7 +490,7 @@ def main():
         "seed": args.seed,
         "repeats": args.repeats,
         "warmup": args.warmup,
-        "disclaimer": patients.DISCLAIMER,
+        "cohort_note": patients.SCORE_NOTE,
         "plaintext_mean_risk_score": float(np.mean(reference_scores)),
         "depth_required": patients.multiplicative_depth_required(),
         "plaintext": plaintext,

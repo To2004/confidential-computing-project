@@ -22,10 +22,8 @@ run_comparison.py` from inside this directory.
 | `tenseal_benchmark.py` | (library module; TenSEAL CKKS primitives) |
 | `openfhe_benchmark.py` | (library module; OpenFHE CKKS primitives) |
 | `run_comparison.py` | `results/results.json` |
-| `benchmark_scaling.py` | `results/scaling_results.json` |
 | `risk_score_benchmark.py` | `results/risk_score_results.json` |
 | `matched_comparison.py` | `results/matched_comparison_results.json` |
-| `ind_cpad_flooding.py` | `results/ind_cpad_results.json` |
 | `plot_results.py` | `figures/chart_*.png` |
 
 The three `*_benchmark.py` files double as importable modules and as standalone
@@ -38,16 +36,11 @@ project_paths ──┐
                 ├──> run_comparison ──> plaintext_baseline
 benchmark_harness┤                      tenseal_benchmark
                  │                      openfhe_benchmark
-                 ├──> benchmark_scaling
                  ├──> matched_comparison
-                 └──> risk_score_benchmark <── ind_cpad_flooding
+                 └──> risk_score_benchmark
                              │
                       synthetic_patients
 ```
-
-`ind_cpad_flooding.py` deliberately imports `risk_score_benchmark` and evaluates
-*its* circuit under noise-flooding parameters rather than reimplementing it, so
-the security experiment and the performance experiment cannot drift apart.
 
 ## Running
 

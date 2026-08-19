@@ -1,8 +1,7 @@
 # In-Depth Analysis of Homomorphic Encryption Libraries
 
 Benchmark comparison of **TenSEAL** and **OpenFHE** — both using the CKKS scheme —
-against an unencrypted baseline, for the Confidential Computing course at
-Ben-Gurion University of the Negev.
+against an unencrypted baseline. Ben-Gurion University of the Negev.
 
 The project measures what homomorphic encryption actually costs: runtime, memory,
 approximation error, and how all three behave on a computation more realistic than
@@ -10,28 +9,27 @@ a single average.
 
 > ## 📄 **[Read the report → `final_report.pdf`](final_report.pdf)**
 >
-> 11 pages. LaTeX source: [`report/final_report.tex`](report/final_report.tex).
+> 12 pages. LaTeX source: [`report/final_report.tex`](report/final_report.tex).
 
 ## What is measured
 
 | Experiment | Script | Output |
 |---|---|---|
 | Primitive operations (encrypt, add, multiply, sum, average, dot product, decrypt) + key generation | `src/run_comparison.py` | `results/results.json` |
-| Scaling with vector size (5 → 500 elements) | `src/benchmark_scaling.py` | `results/scaling_results.json` |
 | Encrypted synthetic medical risk score over 1000 patients | `src/risk_score_benchmark.py` | `results/risk_score_results.json` |
 | OpenFHE forced onto TenSEAL's parameters (like-for-like) | `src/matched_comparison.py` | `results/matched_comparison_results.json` |
-| IND-CPA^D noise flooding — *beyond the proposal's scope, kept as an extra* | `src/ind_cpad_flooding.py` | `results/ind_cpad_results.json` |
 | All charts | `src/plot_results.py` | `figures/chart_*.png` |
 
-Every timed figure is a **mean over 1000 repetitions**, taken after a warm-up phase
-that is discarded. See [Methodology](#methodology) below.
+Primitive-operation figures are a **mean over 1000 repetitions** after a discarded
+warm-up; the matched-parameter experiment uses 200 and key generation 50. See
+[Methodology](#methodology) below.
 
 ## Environment
 
-OpenFHE is the constraint. Its PyPI wheels are **Linux-only** and are built for a
-**specific CPython version** — the current wheel ships a `cpython-38` shared
-object, so it imports only under **Python 3.8**. Installing it under 3.9+ appears
-to succeed and then fails at import with `No module named 'openfhe.openfhe'`.
+OpenFHE is the constraint: its PyPI wheels are **Linux-only**, published for Ubuntu
+LTS releases. The wheel is tagged `py3-none-any`, so `pip` will install it on any
+platform and it then fails at import off Linux — verify the import rather than
+trusting a successful install.
 
 ```bash
 conda create -y -n he38 python=3.8
@@ -45,8 +43,8 @@ Verify both libraries load before running anything:
 python -c "import tenseal, openfhe; print('ok')"
 ```
 
-TenSEAL alone installs cleanly on Windows, macOS and Linux across Python
-versions. On Windows, run the OpenFHE half under WSL or on a Linux host; the
+TenSEAL alone installs cleanly on Windows, macOS and Linux. On Windows, run the
+OpenFHE half under WSL or on a Linux host; the
 scripts degrade gracefully and report the plaintext and TenSEAL results only.
 
 ## Running the benchmarks
@@ -68,10 +66,8 @@ Individual experiments, with the repetition count under your control:
 
 ```bash
 python src/run_comparison.py       --repeats 1000 --warmup 50
-python src/benchmark_scaling.py    --repeats 1000 --warmup 20
 python src/risk_score_benchmark.py --repeats 1000 --warmup 20
 python src/matched_comparison.py   --repeats 200
-python src/ind_cpad_flooding.py    --repeats 200
 python src/plot_results.py
 ```
 
@@ -110,8 +106,7 @@ python -m unittest discover -s tests
 
 47 tests covering the statistics (against hand-computed values), the risk score
 (against a hand-computed patient), and the ciphertext-padding invariant — the last
-of these guards an error that would otherwise produce plausible-looking wrong
-results.
+of these enforces the ciphertext-padding rule that the cohort mean depends on.
 
 ### Charts produced
 
@@ -120,16 +115,13 @@ results.
 | `figures/chart_operations.png` | Mean time per operation, and slowdown vs plaintext |
 | `figures/chart_memory.png` | What `tracemalloc` sees beside what a ciphertext actually costs |
 | `figures/chart_errors.png` | CKKS approximation error per operation |
-| `figures/chart_scaling.png` | Pipeline time vs vector size |
 | `figures/chart_risk_score.png` | Risk-score stage costs, cohort distribution, accuracy |
 | `figures/chart_matched_comparison.png` | OpenFHE at TenSEAL's parameters: speed and precision |
-| `figures/chart_ind_cpad.png` | Cost of the IND-CPA^D defence, and which libraries randomize decryption |
 
 Bars and markers carry 95% confidence intervals. Series colours are a
 colourblind-safe categorical set, checked for deuteranopia, protanopia and
-tritanopia separation. The PDF includes two of the seven; the rest duplicate tables
-in the text, or belong to experiments kept in the repository rather than the report,
-and are left out to keep it short.
+tritanopia separation. The PDF includes two of the five; the rest duplicate tables
+in the text and are left out to keep it short.
 
 ### Regenerating the report PDF
 
@@ -185,13 +177,10 @@ features (age, systolic blood pressure, BMI, cholesterol, glucose) and defines a
 **synthetic risk score** over them. `src/risk_score_benchmark.py` evaluates that score
 homomorphically and compares it against the plaintext reference.
 
-> The risk score is a synthetic construct built for demonstration purposes only.
-> It is **not** a validated clinical model, it is not derived from medical
-> literature, and it carries no medical meaning. The cohort is likewise
-> synthetic — values are drawn from plausible-looking distributions, not from
-> patients.
+Both the score and the cohort are synthetic: feature values are drawn from a fixed
+seed rather than from patient records, which makes every run reproducible.
 
-Its purpose is to give the benchmark a computation with real multiplicative
+The score gives the benchmark a computation with real multiplicative
 depth. Beyond a weighted average of normalized features, it includes two
 interaction terms between distinct features and one quadratic term, so it
 requires ciphertext × ciphertext multiplication rather than only multiplication by
