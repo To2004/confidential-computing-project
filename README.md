@@ -220,4 +220,4 @@ Start here:
 
 ## Authors
 
-Itai Zloclzower, Jacob Shemesh, Tomer Ovadya, Yoni Glickstein
+Itay Zloczower, Jacob Shemesh, Tomer Ovadya, Yoni Glickstein
