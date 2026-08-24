@@ -1,0 +1,15 @@
+{
+  // uv-managed interpreters are not registered with Windows, so VS Code's
+  // auto-discovery often misses .venv. Point at it explicitly.
+  "python.defaultInterpreterPath": "${workspaceFolder}\.venv\Scripts\python.exe",
+  "python.terminal.activateEnvironment": true,
+
+  // Notebooks must execute with the repository root as the working directory:
+  // their setup cell clones the project from GitHub if it cannot find
+  // src/benchmark_harness.py relative to cwd, which would silently benchmark a
+  // fresh clone instead of this working tree.
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+
+  "python.testing.unittestEnabled": true,
+  "python.testing.unittestArgs": ["-v", "-s", "tests", "-p", "test_*.py"]
+}
