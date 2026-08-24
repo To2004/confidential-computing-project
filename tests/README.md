@@ -6,13 +6,14 @@ Run from the repository root:
 python -m unittest discover -s tests
 ```
 
-40 tests, no external test framework required — plain `unittest`. Each file
+57 tests, no external test framework required — plain `unittest`. Each file
 inserts `../src` onto `sys.path` at import time, so the tests work regardless of
 how they are invoked.
 
 | File | Covers |
 |---|---|
 | `test_benchmark_harness.py` | Summary statistics against hand-computed values; that the median and trimmed mean resist an outlier the mean does not; percentile interpolation; confidence-interval shrinkage (including Bessel's correction); bootstrap reproducibility; drift detection; warm-up exclusion; memory measurement |
+| `test_notebook_tools.py` | That a snippet displayed in a notebook is extracted verbatim from `src/` and parses on its own; that extraction stops at the end of a definition; dotted `Class.method` lookup; and that every definition the notebooks display still exists under that name |
 | `test_synthetic_patients.py` | Normalization endpoints; the affine form used by the encrypted path matching direct normalization; the risk score against a hand-computed patient (all features at range midpoint must score exactly 45.0); cohort reproducibility and range clipping; **the padding invariant** |
 
 ## Why the padding test matters

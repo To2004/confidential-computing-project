@@ -13,6 +13,7 @@ run_comparison.py` from inside this directory.
 | `project_paths.py` | Locates `results/` and `figures/` relative to the repository root |
 | `benchmark_harness.py` | Warm-up, repetitions, robust statistics, drift detection, memory measurement, accuracy gates — used by every experiment |
 | `synthetic_patients.py` | The synthetic cohort and the synthetic risk score definition |
+| `notebook_tools.py` | Reads a definition out of a source file so the notebooks can display real code instead of a copy of it |
 
 ## Benchmarks
 
@@ -40,6 +41,9 @@ benchmark_harness┤                      tenseal_benchmark
                  └──> risk_score_benchmark
                              │
                       synthetic_patients
+
+notebook_tools ──> (imported by the notebooks only; reads src/*.py as text,
+                    so it never imports the module it is displaying)
 ```
 
 ## Running

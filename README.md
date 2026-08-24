@@ -104,9 +104,10 @@ measurements dropped from 30.9% to 2.9%. If you run on a shared machine anyway, 
 python -m unittest discover -s tests
 ```
 
-47 tests covering the statistics (against hand-computed values), the risk score
-(against a hand-computed patient), and the ciphertext-padding invariant — the last
-of these enforces the ciphertext-padding rule that the cohort mean depends on.
+57 tests covering the statistics (against hand-computed values), the risk score
+(against a hand-computed patient), the ciphertext-padding invariant that the cohort
+mean depends on, and the notebook display helpers — the last of these assert that
+every definition a notebook puts on screen still exists in `src/` under that name.
 
 ### Charts produced
 
